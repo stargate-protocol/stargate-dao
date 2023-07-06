@@ -1,0 +1,15 @@
+.prettierignore
+yarn.lock
+dist/
+out/
+.turbo/
+node_modules/
+exports/
+artifacts*/
+*cache/
+lib/
+**/deployments/
+.yarn/
+.vscode/
+typechain-types/
+build/
