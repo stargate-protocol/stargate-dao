@@ -406,9 +406,9 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
     function _checkpointUserBalance(address user) internal {
         uint maxUserEpoch = _votingEscrow.user_point_epoch(user);
 
-        // If user has no epochs then they have never locked veSTG.
+        // If user has no epochs then they have never locked STG.
         // They clearly will not then receive fees.
-        if (maxUserEpoch == 0) return;
+        require(maxUserEpoch > 0, "veSTG balance is zero");
 
         UserState storage userState = _userState[user];
 
@@ -522,20 +522,20 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
             return;
         }
 
-		IVotingEscrow votingEscrow = _votingEscrow;
+        IVotingEscrow votingEscrow = _votingEscrow;
         votingEscrow.checkpoint();
 
         // Step through the each week and cache the total supply at beginning of week on this contract
         for (uint i = 0; i < 20; ++i) {
             if (nextWeekToCheckpoint > weekStart) break;
 
-			// NOTE: Replaced Balancer's logic with Solidly/Velodrome implementation due to the differences in the VotingEscrow totalSupply function
-			// See https://github.com/velodrome-finance/v1/blob/master/contracts/RewardsDistributor.sol#L143
+            // NOTE: Replaced Balancer's logic with Solidly/Velodrome implementation due to the differences in the VotingEscrow totalSupply function
+            // See https://github.com/velodrome-finance/v1/blob/master/contracts/RewardsDistributor.sol#L143
 
-			uint epoch = _findTimestampEpoch(nextWeekToCheckpoint);
-			IVotingEscrow.Point memory pt = votingEscrow.point_history(epoch);
-			
-			int128 dt = nextWeekToCheckpoint > pt.ts ? int128(nextWeekToCheckpoint - pt.ts) : 0;
+            uint epoch = _findTimestampEpoch(nextWeekToCheckpoint);
+            IVotingEscrow.Point memory pt = votingEscrow.point_history(epoch);
+
+            int128 dt = nextWeekToCheckpoint > pt.ts ? int128(nextWeekToCheckpoint - pt.ts) : 0;
             int128 supply = pt.bias - pt.slope * dt;
             _veSupplyCache[nextWeekToCheckpoint] = supply > 0 ? uint(supply) : 0;
 
@@ -564,10 +564,10 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @dev Return the user epoch number for `user` corresponding to the provided `timestamp`
      */
     function _findTimestampUserEpoch(address user, uint timestamp, uint minUserEpoch, uint maxUserEpoch) internal view returns (uint) {
-		IVotingEscrow votingEscrow = _votingEscrow;
+        IVotingEscrow votingEscrow = _votingEscrow;
         uint min = minUserEpoch;
         uint max = maxUserEpoch;
-		
+
         // Perform binary search through epochs to find epoch containing `timestamp`
         for (uint i = 0; i < 128; ++i) {
             if (min >= max) break;
@@ -586,15 +586,15 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
         return min;
     }
 
-	/**
+    /**
      * @dev Return the global epoch number corresponding to the provided `timestamp`
      */
     function _findTimestampEpoch(uint timestamp) internal view returns (uint) {
-		IVotingEscrow votingEscrow = _votingEscrow;
+        IVotingEscrow votingEscrow = _votingEscrow;
         uint min = 0;
-        uint max = votingEscrow.epoch();		
+        uint max = votingEscrow.epoch();
 
-		// Perform binary search through epochs to find epoch containing `timestamp`
+        // Perform binary search through epochs to find epoch containing `timestamp`
         for (uint i = 0; i < 128; i++) {
             if (min >= max) break;
 
