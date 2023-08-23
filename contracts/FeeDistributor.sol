@@ -8,6 +8,7 @@ import "@openzeppelin-solc-0.7/contracts/math/Math.sol";
 import "@openzeppelin-solc-0.7/contracts/math/SafeMath.sol";
 import "@openzeppelin-solc-0.7/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin-solc-0.7/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin-solc-0.7/contracts/access/Ownable.sol";
 
 import "./interfaces/IFeeDistributor.sol";
 import "./interfaces/IVotingEscrow.sol";
@@ -22,7 +23,7 @@ import "./interfaces/IVotingEscrow.sol";
  * @dev Supports distributing arbitrarily many different tokens. In order to start distributing a new token to veSTG
  * holders simply transfer the tokens to the `FeeDistributor` contract and then call `checkpointToken`.
  */
-contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
+contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
     using SafeMath for uint;
     using SafeERC20 for IERC20;
 
@@ -302,6 +303,18 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
         }
 
         return amounts;
+    }
+
+    // Governance
+
+    /**
+     * @notice Withdraws the specified `amount` of the `token` from the contract to the `recipient`. Can be called only by Stargate DAO.
+     * @param token - The token to withdraw.
+     * @param amount - The amount to withdraw.
+     * @param recipient - The address to transfer the tokens to.
+     */
+    function withdrawToken(IERC20 token, uint amount, address recipient) external onlyOwner {
+        token.safeTransfer(recipient, amount);
     }
 
     // Internal functions

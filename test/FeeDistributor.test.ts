@@ -770,8 +770,45 @@ describe("FeeDistributor", function () {
                                 itClaimsTokensCorrectly(() => feeDistributor.connect(user1).claimTokens(user1.address, tokenAddresses))
                             })
                         })
-                    })                    
+                    })
                 })
+            })
+        })
+    })
+
+    describe("withdrawing", () => {
+        const amount = ethers.utils.parseEther("1")
+        beforeEach("advance time past startTime", async () => {
+            await advanceToTimestamp(startTime.add(100))
+        })
+
+        beforeEach("send tokens", async () => {
+            await feeDistributor.checkpointToken(rewardsToken.address)
+            await rewardsToken.mint(feeDistributor.address, amount)
+            await feeDistributor.checkpointToken(rewardsToken.address)
+
+            // For the week to become claimable we must wait until the next week starts
+            const nextWeek = roundUpTimestamp(await currentTimestamp())
+            await advanceToTimestamp(nextWeek.add(1))
+        })
+
+        context("when called by a non-owner", () => {
+            it("reverts", async () => {
+                await expect(feeDistributor.connect(user1).withdrawToken(rewardsToken.address, amount, user1.address)).to.be.revertedWith(
+                    "Ownable: caller is not the owner"
+                )
+            })
+        })
+
+        context("when called by the owner", () => {
+            beforeEach("transfer ownership", async () => {
+                await feeDistributor.transferOwnership(user1.address)
+            })
+
+            it("withdraws", async () => {
+                expect(await rewardsToken.balanceOf(user1.address)).to.be.eq(0)
+                await feeDistributor.connect(user1).withdrawToken(rewardsToken.address, amount, user1.address)
+                expect(await rewardsToken.balanceOf(user1.address)).to.be.eq(amount)
             })
         })
     })
