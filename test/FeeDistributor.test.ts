@@ -638,6 +638,24 @@ describe("FeeDistributor", function () {
                                 )
                             })
                         })
+
+                        context("when only VotingEscrow holder can claim", () => {
+                            beforeEach("enable claiming only by VotingEscrow holder", async () => {
+                                await feeDistributor.connect(user1).enableOnlyVeHolderClaiming(true)
+                            })
+
+                            context("when called by a third-party", () => {
+                                it("reverts", async () => {
+                                    await expect(
+                                        feeDistributor.connect(other).claimToken(user1.address, rewardsToken.address)
+                                    ).to.be.revertedWith("Claiming is not allowed")
+                                })
+                            })
+
+                            context("when called by the VotingEscrow holder", () => {
+                                itClaimsTokensCorrectly(() => feeDistributor.connect(user1).claimToken(user1.address, rewardsToken.address))
+                            })
+                        })
                     })
                 })
             })
@@ -734,7 +752,25 @@ describe("FeeDistributor", function () {
                         })
 
                         itClaimsTokensCorrectly(() => feeDistributor.claimTokens(user1.address, tokenAddresses))
-                    })
+
+                        context("when only VotingEscrow holder can claim", () => {
+                            beforeEach("enable claiming only by VotingEscrow holder", async () => {
+                                await feeDistributor.connect(user1).enableOnlyVeHolderClaiming(true)
+                            })
+
+                            context("when called by a third-party", () => {
+                                it("reverts", async () => {
+                                    await expect(feeDistributor.connect(other).claimTokens(user1.address, tokenAddresses)).to.be.revertedWith(
+                                        "Claiming is not allowed"
+                                    )
+                                })
+                            })
+
+                            context("when called by the VotingEscrow holder", () => {
+                                itClaimsTokensCorrectly(() => feeDistributor.connect(user1).claimTokens(user1.address, tokenAddresses))
+                            })
+                        })
+                    })                    
                 })
             })
         })

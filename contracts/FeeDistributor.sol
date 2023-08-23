@@ -60,6 +60,18 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
     mapping(address => UserState) internal _userState;
     mapping(address => mapping(uint => uint)) private _userBalanceAtTimestamp;
     mapping(address => mapping(IERC20 => uint)) private _userTokenTimeCursor;
+    mapping(address => bool) private _onlyVeHolderClaimingEnabled;
+
+    /**
+     * @dev Reverts if only the VotingEscrow holder can claim their rewards and the given address is a third-party caller.
+     * @param user - Address to validate as the only allowed caller.
+     */
+    modifier allowedToClaim(address user) {
+        if (_onlyVeHolderClaimingEnabled[user]) {
+            require(msg.sender == user, "Claiming is not allowed");
+        }
+        _;
+    }
 
     constructor(IVotingEscrow votingEscrow, uint startTime) {
         _votingEscrow = votingEscrow;
@@ -153,6 +165,24 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
         return _tokensPerWeek[token][timestamp];
     }
 
+    // Preventing third-party claiming
+
+    /**
+     * @notice Enables / disables rewards claiming only by the VotingEscrow holder for the message sender.
+     * @param enabled - True if only the VotingEscrow holder can claim their rewards, false otherwise.
+     */
+    function enableOnlyVeHolderClaiming(bool enabled) external override {
+        _onlyVeHolderClaimingEnabled[msg.sender] = enabled;
+        emit OnlyVeHolderClaimingEnabled(msg.sender, enabled);
+    }
+
+    /**
+     * @notice Returns true if only the VotingEscrow holder can claim their rewards, false otherwise.
+     */
+    function onlyVeHolderClaimingEnabled(address user) external view override returns (bool) {
+        return _onlyVeHolderClaimingEnabled[user];
+    }
+
     // Depositing
 
     /**
@@ -243,7 +273,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param token - The ERC20 token address to be claimed.
      * @return The amount of `token` sent to `user` as a result of claiming.
      */
-    function claimToken(address user, IERC20 token) external override nonReentrant returns (uint) {
+    function claimToken(address user, IERC20 token) external override nonReentrant allowedToClaim(user) returns (uint) {
         _checkpointTotalSupply();
         _checkpointUserBalance(user);
         _checkpointToken(token, false);
@@ -260,7 +290,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param tokens - An array of ERC20 token addresses to be claimed.
      * @return An array of the amounts of each token in `tokens` sent to `user` as a result of claiming.
      */
-    function claimTokens(address user, IERC20[] calldata tokens) external override nonReentrant returns (uint[] memory) {
+    function claimTokens(address user, IERC20[] calldata tokens) external override nonReentrant allowedToClaim(user) returns (uint[] memory) {
         _checkpointTotalSupply();
         _checkpointUserBalance(user);
 

@@ -16,6 +16,7 @@ import "./IVotingEscrow.sol";
 interface IFeeDistributor {
     event TokenCheckpointed(IERC20 token, uint256 amount, uint256 lastCheckpointTimestamp);
     event TokensClaimed(address user, IERC20 token, uint256 amount, uint256 userTokenTimeCursor);
+    event OnlyVeHolderClaimingEnabled(address user, bool enabled);
 
     /**
      * @notice Returns the VotingEscrow (veSTG) token contract
@@ -74,6 +75,19 @@ interface IFeeDistributor {
      * @param timestamp - The timestamp corresponding to the beginning of the week of interest.
      */
     function getTokensDistributedInWeek(IERC20 token, uint256 timestamp) external view returns (uint256);
+
+    // Preventing third-party claiming
+
+    /**
+     * @notice Enables / disables rewards claiming only by the VotingEscrow holder for the message sender.
+     * @param enabled - True if only the VotingEscrow holder can claim their rewards, false otherwise.
+     */
+    function enableOnlyVeHolderClaiming(bool enabled) external;
+
+    /**
+     * @notice Returns true if only the VotingEscrow holder can claim their rewards, false otherwise.
+     */
+    function onlyVeHolderClaimingEnabled(address user) external view returns (bool);
 
     // Depositing
 
