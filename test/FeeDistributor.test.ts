@@ -74,7 +74,7 @@ describe("FeeDistributor", function () {
 
         // startTime is rounded up to the beginning of next week
         startTime = roundUpTimestamp(await currentTimestamp())
-        const feeDistributorFactory = await ethers.getContractFactory("TestFeeDistributor")
+        const feeDistributorFactory = await ethers.getContractFactory("FeeDistributor")
         feeDistributor = await feeDistributorFactory.deploy(votingEscrow.address, startTime)
 
         const amount = utils.parseEther("1")

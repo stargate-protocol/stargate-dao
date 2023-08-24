@@ -20,12 +20,14 @@ import "./interfaces/IVotingEscrow.sol";
  * @author Balancer Labs. Original version https://github.com/balancer/balancer-v2-monorepo/blob/master/pkg/liquidity-mining/contracts/fee-distribution/FeeDistributor.sol
  * @notice Distributes any tokens transferred to the contract (e.g. Protocol fees) among veSTG
  * holders proportionally based on a snapshot of the week at which the tokens are sent to the FeeDistributor contract.
- * @dev Supports distributing arbitrarily many different tokens. In order to start distributing a new token to veSTG
- * holders simply transfer the tokens to the `FeeDistributor` contract and then call `checkpointToken`.
+ * @dev Supports distributing arbitrarily many different tokens. In order to start distributing a new token to veSTG holders call `depositToken`.
  */
 contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
+
+    // gas optimization
+    uint256 private constant WEEK_MINUS_SECOND = 1 weeks - 1;
 
     IVotingEscrow private immutable _votingEscrow;
 
@@ -86,6 +88,10 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
             // then any tokens which are distributed this week will be lost permanently.
             require(votingEscrow.totalSupplyAtT(currentWeek) > 0, "Zero total supply results in lost tokens");
         }
+
+        IVotingEscrow.Point memory pt = votingEscrow.point_history(0);
+        require(startTime > pt.ts, "Cannot start before VotingEscrow first epoch");
+
         _startTime = startTime;
         _timeCursor = startTime;
     }
@@ -98,10 +104,25 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Returns the time when fee distribution starts.
+     */
+    function getStartTime() external view override returns (uint256) {
+        return _startTime;
+    }
+
+    /**
      * @notice Returns the global time cursor representing the most earliest uncheckpointed week.
      */
     function getTimeCursor() external view override returns (uint256) {
         return _timeCursor;
+    }
+
+    /**
+     * @notice Returns the user-level start time representing the first week they're eligible to claim tokens.
+     * @param user - The address of the user to query.
+     */
+    function getUserStartTime(address user) external view override returns (uint256) {
+        return _userState[user].startTime;
     }
 
     /**
@@ -113,11 +134,35 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Returns the user-level last checkpointed epoch.
+     * @param user - The address of the user to query.
+     */
+    function getUserLastEpochCheckpointed(address user) external view override returns (uint256) {
+        return _userState[user].lastEpochCheckpointed;
+    }
+
+    /**
+     * @notice Returns the token-level start time representing the timestamp users could start claiming this token
+     * @param token - The ERC20 token address to query.
+     */
+    function getTokenStartTime(IERC20 token) external view override returns (uint256) {
+        return _tokenState[token].startTime;
+    }
+
+    /**
      * @notice Returns the token-level time cursor storing the timestamp at up to which tokens have been distributed.
      * @param token - The ERC20 token address to query.
      */
     function getTokenTimeCursor(IERC20 token) external view override returns (uint256) {
         return _tokenState[token].timeCursor;
+    }
+
+    /**
+     * @notice Returns the token-level cached balance.
+     * @param token - The ERC20 token address to query.
+     */
+    function getTokenCachedBalance(IERC20 token) external view override returns (uint256) {
+        return _tokenState[token].cachedBalance;
     }
 
     /**
@@ -279,8 +324,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
         _checkpointUserBalance(user);
         _checkpointToken(token, false);
 
-        uint256 amount = _claimToken(user, token);
-        return amount;
+        return _claimToken(user, token);
     }
 
     /**
@@ -369,13 +413,13 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
         uint256 lastTokenTime = tokenState.timeCursor;
         uint256 timeSinceLastCheckpoint;
         if (lastTokenTime == 0) {
+            // Prevent someone from assigning tokens to an inaccessible week.
+            require(block.timestamp > _startTime, "Fee distribution has not started yet");
+
             // If it's the first time we're checkpointing this token then start distributing from now.
             // Also mark at which timestamp users should start attempts to claim this token from.
             lastTokenTime = block.timestamp;
             tokenState.startTime = uint64(_roundDownTimestamp(block.timestamp));
-
-            // Prevent someone from assigning tokens to an inaccessible week.
-            require(block.timestamp > _startTime, "Fee distribution has not started yet");
         } else {
             timeSinceLastCheckpoint = block.timestamp - lastTokenTime;
 
@@ -565,8 +609,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
             return;
         }
 
-        IVotingEscrow votingEscrow = _votingEscrow;
-        votingEscrow.checkpoint();
+        _votingEscrow.checkpoint();
 
         // Step through the each week and cache the total supply at beginning of week on this contract
         for (uint256 i = 0; i < 20; ++i) {
@@ -576,7 +619,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
             // See https://github.com/velodrome-finance/v1/blob/master/contracts/RewardsDistributor.sol#L143
 
             uint256 epoch = _findTimestampEpoch(nextWeekToCheckpoint);
-            IVotingEscrow.Point memory pt = votingEscrow.point_history(epoch);
+            IVotingEscrow.Point memory pt = _votingEscrow.point_history(epoch);
 
             int128 dt = nextWeekToCheckpoint > pt.ts ? int128(nextWeekToCheckpoint - pt.ts) : 0;
             int128 supply = pt.bias - pt.slope * dt;
@@ -607,7 +650,6 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      * @dev Return the user epoch number for `user` corresponding to the provided `timestamp`
      */
     function _findTimestampUserEpoch(address user, uint256 timestamp, uint256 minUserEpoch, uint256 maxUserEpoch) internal view returns (uint256) {
-        IVotingEscrow votingEscrow = _votingEscrow;
         uint256 min = minUserEpoch;
         uint256 max = maxUserEpoch;
 
@@ -618,7 +660,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
             // Algorithm assumes that inputs are less than 2^128 so this operation is safe.
             // +2 avoids getting stuck in min == mid < max
             uint256 mid = (min + max + 2) / 2;
-            IVotingEscrow.Point memory pt = votingEscrow.user_point_history(user, mid);
+            IVotingEscrow.Point memory pt = _votingEscrow.user_point_history(user, mid);
             if (pt.ts <= timestamp) {
                 min = mid;
             } else {
@@ -633,9 +675,8 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      * @dev Return the global epoch number corresponding to the provided `timestamp`
      */
     function _findTimestampEpoch(uint256 timestamp) internal view returns (uint256) {
-        IVotingEscrow votingEscrow = _votingEscrow;
         uint256 min = 0;
-        uint256 max = votingEscrow.epoch();
+        uint256 max = _votingEscrow.epoch();
 
         // Perform binary search through epochs to find epoch containing `timestamp`
         for (uint256 i = 0; i < 128; i++) {
@@ -644,7 +685,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
             // Algorithm assumes that inputs are less than 2^128 so this operation is safe.
             // +2 avoids getting stuck in min == mid < max
             uint256 mid = (min + max + 2) / 2;
-            IVotingEscrow.Point memory pt = votingEscrow.point_history(mid);
+            IVotingEscrow.Point memory pt = _votingEscrow.point_history(mid);
             if (pt.ts <= timestamp) {
                 min = mid;
             } else {
@@ -667,6 +708,6 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      */
     function _roundUpTimestamp(uint256 timestamp) private pure returns (uint256) {
         // Overflows are impossible here for all realistic inputs.
-        return _roundDownTimestamp(timestamp + 1 weeks - 1);
+        return _roundDownTimestamp(timestamp + WEEK_MINUS_SECOND);
     }
 }

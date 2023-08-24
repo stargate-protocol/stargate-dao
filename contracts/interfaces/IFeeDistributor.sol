@@ -24,6 +24,11 @@ interface IFeeDistributor {
     function getVotingEscrow() external view returns (IVotingEscrow);
 
     /**
+     * @notice Returns the time when fee distribution starts.
+     */
+    function getStartTime() external view returns (uint256);
+
+    /**
      * @notice Returns the global time cursor representing the most earliest uncheckpointed week.
      */
     function getTimeCursor() external view returns (uint256);
@@ -35,10 +40,34 @@ interface IFeeDistributor {
     function getUserTimeCursor(address user) external view returns (uint256);
 
     /**
+     * @notice Returns the user-level start time representing the first week they're eligible to claim tokens.
+     * @param user - The address of the user to query.
+     */
+    function getUserStartTime(address user) external view returns (uint256);
+
+    /**
+     * @notice Returns the token-level start time representing the timestamp users could start claiming this token
+     * @param token - The ERC20 token address to query.
+     */
+    function getTokenStartTime(IERC20 token) external view returns (uint256);
+
+    /**
      * @notice Returns the token-level time cursor storing the timestamp at up to which tokens have been distributed.
      * @param token - The ERC20 token address to query.
      */
     function getTokenTimeCursor(IERC20 token) external view returns (uint256);
+
+    /**
+     * @notice Returns the token-level cached balance.
+     * @param token - The ERC20 token address to query.
+     */
+    function getTokenCachedBalance(IERC20 token) external view returns (uint256);
+
+    /**
+     * @notice Returns the user-level last checkpointed epoch.
+     * @param user - The address of the user to query.
+     */
+    function getUserLastEpochCheckpointed(address user) external view returns (uint256);
 
     /**
      * @notice Returns the user-level time cursor storing the timestamp of the latest token distribution claimed.
