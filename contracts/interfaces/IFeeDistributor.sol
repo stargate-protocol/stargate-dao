@@ -16,11 +16,17 @@ import "./IVotingEscrow.sol";
 interface IFeeDistributor {
     event TokenCheckpointed(IERC20 token, uint256 amount, uint256 lastCheckpointTimestamp);
     event TokensClaimed(address user, IERC20 token, uint256 amount, uint256 userTokenTimeCursor);
+    event OnlyVeHolderClaimingEnabled(address user, bool enabled);
 
     /**
      * @notice Returns the VotingEscrow (veSTG) token contract
      */
     function getVotingEscrow() external view returns (IVotingEscrow);
+
+    /**
+     * @notice Returns the time when fee distribution starts.
+     */
+    function getStartTime() external view returns (uint256);
 
     /**
      * @notice Returns the global time cursor representing the most earliest uncheckpointed week.
@@ -34,10 +40,34 @@ interface IFeeDistributor {
     function getUserTimeCursor(address user) external view returns (uint256);
 
     /**
+     * @notice Returns the user-level start time representing the first week they're eligible to claim tokens.
+     * @param user - The address of the user to query.
+     */
+    function getUserStartTime(address user) external view returns (uint256);
+
+    /**
+     * @notice Returns the token-level start time representing the timestamp users could start claiming this token
+     * @param token - The ERC20 token address to query.
+     */
+    function getTokenStartTime(IERC20 token) external view returns (uint256);
+
+    /**
      * @notice Returns the token-level time cursor storing the timestamp at up to which tokens have been distributed.
      * @param token - The ERC20 token address to query.
      */
     function getTokenTimeCursor(IERC20 token) external view returns (uint256);
+
+    /**
+     * @notice Returns the token-level cached balance.
+     * @param token - The ERC20 token address to query.
+     */
+    function getTokenCachedBalance(IERC20 token) external view returns (uint256);
+
+    /**
+     * @notice Returns the user-level last checkpointed epoch.
+     * @param user - The address of the user to query.
+     */
+    function getUserLastEpochCheckpointed(address user) external view returns (uint256);
 
     /**
      * @notice Returns the user-level time cursor storing the timestamp of the latest token distribution claimed.
@@ -74,6 +104,19 @@ interface IFeeDistributor {
      * @param timestamp - The timestamp corresponding to the beginning of the week of interest.
      */
     function getTokensDistributedInWeek(IERC20 token, uint256 timestamp) external view returns (uint256);
+
+    // Preventing third-party claiming
+
+    /**
+     * @notice Enables / disables rewards claiming only by the VotingEscrow holder for the message sender.
+     * @param enabled - True if only the VotingEscrow holder can claim their rewards, false otherwise.
+     */
+    function enableOnlyVeHolderClaiming(bool enabled) external;
+
+    /**
+     * @notice Returns true if only the VotingEscrow holder can claim their rewards, false otherwise.
+     */
+    function onlyVeHolderClaimingEnabled(address user) external view returns (bool);
 
     // Depositing
 

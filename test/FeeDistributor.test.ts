@@ -1,10 +1,10 @@
-import { ethers } from 'hardhat'
-import { BigNumber, Contract, ContractTransaction, utils } from 'ethers'
-import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers'
-import { expect } from 'chai'
-import { advanceToTimestamp, currentTimestamp, DAY, receiptTimestamp, WEEK, roundUpTimestamp, roundDownTimestamp } from './helpers/time'
+import { ethers } from "hardhat"
+import { BigNumber, Contract, ContractTransaction, utils } from "ethers"
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers"
+import { expect } from "chai"
+import { advanceToTimestamp, currentTimestamp, DAY, receiptTimestamp, WEEK, roundUpTimestamp, roundDownTimestamp } from "./helpers/time"
 
-describe('FeeDistributor', function () {
+describe("FeeDistributor", function () {
     let votingEscrow: Contract
     let token: Contract
     let rewardsToken: Contract
@@ -30,7 +30,7 @@ describe('FeeDistributor', function () {
         const weekNumber = BigNumber.from(timestamp).div(WEEK).toNumber()
         const expectedWeekNumber = BigNumber.from(expectedTimestamp).div(WEEK).toNumber()
         const difference = weekNumber - expectedWeekNumber
-        expect(timestamp, `Timestamp is ${Math.abs(difference)} weeks ${difference > 0 ? 'ahead' : 'behind'} expected value`).to.be.eq(
+        expect(timestamp, `Timestamp is ${Math.abs(difference)} weeks ${difference > 0 ? "ahead" : "behind"} expected value`).to.be.eq(
             expectedTimestamp
         )
     }
@@ -59,48 +59,48 @@ describe('FeeDistributor', function () {
         }
     }
 
-    before('setup signers', async () => {
+    before("setup signers", async () => {
         ;[, user1, user2, other] = await ethers.getSigners()
     })
 
-    beforeEach('deploy FeeDistributor', async () => {
-        const tokenFactory = await ethers.getContractFactory('TestToken')
+    beforeEach("deploy FeeDistributor", async () => {
+        const tokenFactory = await ethers.getContractFactory("TestToken")
         token = await tokenFactory.deploy()
         rewardsToken = await tokenFactory.deploy()
         rewardsToken2 = await tokenFactory.deploy()
 
-        const votingEscrowFactory = await ethers.getContractFactory('VotingEscrow')
+        const votingEscrowFactory = await ethers.getContractFactory("VotingEscrow")
         votingEscrow = await votingEscrowFactory.deploy(token.address, 0)
 
         // startTime is rounded up to the beginning of next week
         startTime = roundUpTimestamp(await currentTimestamp())
-        const feeDistributorFactory = await ethers.getContractFactory('TestFeeDistributor')
+        const feeDistributorFactory = await ethers.getContractFactory("FeeDistributor")
         feeDistributor = await feeDistributorFactory.deploy(votingEscrow.address, startTime)
 
-        const amount = utils.parseEther('1')
+        const amount = utils.parseEther("1")
         await createLockForUser(user1, amount, 365 * DAY)
         await createLockForUser(user2, amount.mul(2), 365 * DAY)
         // User 1 owns a third of the locked token - they'll have about a third of the VotingEscrow supply
         // (not exactly due to how decaying works).
 
-        expect(await votingEscrow.balanceOf(user1.address)).to.be.gt(0, 'zero VotingEscrow balance')
-        expect(await votingEscrow.totalSupply()).to.be.gt(0, 'zero VotingEscrow supply')
+        expect(await votingEscrow.balanceOf(user1.address)).to.be.gt(0, "zero VotingEscrow balance")
+        expect(await votingEscrow.totalSupply()).to.be.gt(0, "zero VotingEscrow supply")
     })
 
-    describe('constructor', () => {
-        it('sets the VotingEscrow contract address', async () => {
+    describe("constructor", () => {
+        it("sets the VotingEscrow contract address", async () => {
             expect(await feeDistributor.getVotingEscrow()).to.be.eq(votingEscrow.address)
         })
 
-        it('sets the time cursor to the expected value', async () => {
+        it("sets the time cursor to the expected value", async () => {
             expectTimestampsMatch(await feeDistributor.getTimeCursor(), startTime)
         })
     })
 
-    describe('checkpointing', () => {
-        describe('global checkpoint', () => {
-            context('when startTime has not passed', () => {
-                it('does nothing', async () => {
+    describe("checkpointing", () => {
+        describe("global checkpoint", () => {
+            context("when startTime has not passed", () => {
+                it("does nothing", async () => {
                     expectTimestampsMatch(await feeDistributor.getTimeCursor(), startTime)
                     expect(await feeDistributor.getTotalSupplyAtTimestamp(startTime)).to.be.eq(0)
 
@@ -111,22 +111,22 @@ describe('FeeDistributor', function () {
                 })
             })
 
-            context('when startTime has passed', () => {
-                beforeEach('advance time past startTime', async () => {
+            context("when startTime has passed", () => {
+                beforeEach("advance time past startTime", async () => {
                     await advanceToTimestamp(startTime.add(1))
                 })
 
-                context('when the contract has already been checkpointed', () => {
+                context("when the contract has already been checkpointed", () => {
                     let nextWeek: BigNumber
 
-                    beforeEach('checkpoint contract', async () => {
+                    beforeEach("checkpoint contract", async () => {
                         // We checkpoint the contract so that the next time
                         // we call this function there will be no update to perform.
                         const tx = await feeDistributor.checkpoint()
                         nextWeek = roundUpTimestamp(await receiptTimestamp(tx.wait()))
                     })
 
-                    it('nothing happens', async () => {
+                    it("nothing happens", async () => {
                         expectTimestampsMatch(await feeDistributor.getTimeCursor(), nextWeek)
 
                         await feeDistributor.checkpoint()
@@ -135,23 +135,23 @@ describe('FeeDistributor', function () {
                     })
                 })
 
-                context('when the contract has not been checkpointed this week', () => {
+                context("when the contract has not been checkpointed this week", () => {
                     let start: BigNumber
                     let end: BigNumber
 
-                    beforeEach('advance time past startTime', async () => {
+                    beforeEach("advance time past startTime", async () => {
                         start = startTime.add(1)
                     })
                     context("when the contract hasn't checkpointed in a small number of weeks", () => {
-                        beforeEach('set end timestamp', async () => {
+                        beforeEach("set end timestamp", async () => {
                             end = start.add(WEEK - 1)
                         })
 
-                        beforeEach('advance time to end of period to checkpoint', async () => {
+                        beforeEach("advance time to end of period to checkpoint", async () => {
                             await advanceToTimestamp(end)
                         })
 
-                        it('advances the global time cursor to the start of the next week', async () => {
+                        it("advances the global time cursor to the start of the next week", async () => {
                             expectTimestampsMatch(await feeDistributor.getTimeCursor(), startTime)
 
                             const tx = await feeDistributor.checkpoint()
@@ -168,8 +168,8 @@ describe('FeeDistributor', function () {
             })
         })
 
-        describe('user checkpoint', () => {
-            describe('checkpointUser', () => {
+        describe("user checkpoint", () => {
+            describe("checkpointUser", () => {
                 let user: SignerWithAddress
                 let start: BigNumber
                 let end: BigNumber
@@ -177,14 +177,14 @@ describe('FeeDistributor', function () {
                 function testCheckpoint(checkpointsPerWeek = 0) {
                     let expectFullySynced: boolean
 
-                    beforeEach('advance time to end of period to checkpoint', async () => {
+                    beforeEach("advance time to end of period to checkpoint", async () => {
                         const numWeeks = roundDownTimestamp(end).sub(roundDownTimestamp(start)).div(WEEK).toNumber()
                         for (let i = 0; i < numWeeks; i++) {
                             if (i > 0) {
                                 await advanceToTimestamp(roundDownTimestamp(start).add(i * WEEK + 1))
                             }
                             for (let j = 0; j < checkpointsPerWeek; j++) {
-                                await depositForUser(user, ethers.utils.parseEther('1'))
+                                await depositForUser(user, ethers.utils.parseEther("1"))
                             }
                         }
                         await advanceToTimestamp(end)
@@ -227,7 +227,7 @@ describe('FeeDistributor', function () {
                         }
                     })
 
-                    it('progresses the most recently checkpointed epoch', async () => {
+                    it("progresses the most recently checkpointed epoch", async () => {
                         const currentEpoch = await votingEscrow.user_point_epoch(user.address)
                         const previousLastCheckpointedEpoch = await feeDistributor.getUserLastEpochCheckpointed(user.address)
 
@@ -253,36 +253,36 @@ describe('FeeDistributor', function () {
                     })
                 }
 
-                context('on first checkpoint', () => {
-                    context('when startTime has not passed', () => {
-                        it('reverts', async () => {
-                            await expect(feeDistributor.checkpointUser(user1.address)).to.be.revertedWith('Fee distribution has not started yet')
+                context("on first checkpoint", () => {
+                    context("when startTime has not passed", () => {
+                        it("reverts", async () => {
+                            await expect(feeDistributor.checkpointUser(user1.address)).to.be.revertedWith("Fee distribution has not started yet")
                         })
                     })
 
-                    context('when startTime has passed', () => {
-                        beforeEach('advance time past startTime', async () => {
+                    context("when startTime has passed", () => {
+                        beforeEach("advance time past startTime", async () => {
                             await advanceToTimestamp(startTime.add(1))
 
                             start = await currentTimestamp()
                         })
 
                         context("when user hasn't checkpointed in a small number of weeks", () => {
-                            beforeEach('set end timestamp', async () => {
+                            beforeEach("set end timestamp", async () => {
                                 end = start.add(8 * WEEK - 1)
                             })
 
-                            context('when user locked prior to the beginning of the week', () => {
-                                beforeEach('set user', async () => {
+                            context("when user locked prior to the beginning of the week", () => {
+                                beforeEach("set user", async () => {
                                     user = user1
                                 })
                                 testCheckpoint()
                             })
 
-                            context('when user locked after the beginning of the week', () => {
-                                beforeEach('set user', async () => {
+                            context("when user locked after the beginning of the week", () => {
+                                beforeEach("set user", async () => {
                                     user = other
-                                    await createLockForUser(other, ethers.utils.parseEther('1'), 365 * DAY)
+                                    await createLockForUser(other, ethers.utils.parseEther("1"), 365 * DAY)
                                 })
                                 testCheckpoint()
                             })
@@ -290,23 +290,23 @@ describe('FeeDistributor', function () {
                     })
                 })
 
-                context('on subsequent checkpoints', () => {
-                    beforeEach('advance time past startTime and checkpoint', async () => {
+                context("on subsequent checkpoints", () => {
+                    beforeEach("advance time past startTime and checkpoint", async () => {
                         await advanceToTimestamp(startTime.add(1))
                         await feeDistributor.checkpointUser(user1.address)
                     })
 
-                    context('when the user has already been checkpointed', () => {
+                    context("when the user has already been checkpointed", () => {
                         let nextWeek: BigNumber
 
-                        beforeEach('checkpoint contract', async () => {
+                        beforeEach("checkpoint contract", async () => {
                             // We checkpoint the contract so that the next time
                             // we call this function there will be no update to perform.
                             const tx = await feeDistributor.checkpointUser(user1.address)
                             nextWeek = roundUpTimestamp(await receiptTimestamp(tx.wait()))
                         })
 
-                        context('when user is fully synced up to present', () => {
+                        context("when user is fully synced up to present", () => {
                             it("doesn't update the user's time cursor", async () => {
                                 expectTimestampsMatch(await feeDistributor.getUserTimeCursor(user1.address), nextWeek)
 
@@ -315,7 +315,7 @@ describe('FeeDistributor', function () {
                                 expectTimestampsMatch(await feeDistributor.getUserTimeCursor(user1.address), nextWeek)
                             })
 
-                            it('remains on the most recent user epoch', async () => {
+                            it("remains on the most recent user epoch", async () => {
                                 const currentEpoch = await votingEscrow.user_point_epoch(user1.address)
 
                                 // Check that we're on the most recent user epoch already
@@ -329,11 +329,11 @@ describe('FeeDistributor', function () {
                             })
                         })
 
-                        context('when more checkpoints are created', () => {
-                            beforeEach('create many checkpoints', async () => {
+                        context("when more checkpoints are created", () => {
+                            beforeEach("create many checkpoints", async () => {
                                 const NUM_CHECKPOINTS = 25
                                 for (let i = 0; i < NUM_CHECKPOINTS; i++) {
-                                    await depositForUser(user1, ethers.utils.parseEther('1'))
+                                    await depositForUser(user1, ethers.utils.parseEther("1"))
                                 }
                             })
 
@@ -345,39 +345,39 @@ describe('FeeDistributor', function () {
                                 expectTimestampsMatch(await feeDistributor.getUserTimeCursor(user1.address), nextWeek)
                             })
 
-                            it('progresses the most recently checkpointed epoch', async () => {
-                                await feeDistributor.checkpointUser(user.address)
+                            it("progresses the most recently checkpointed epoch", async () => {
+                                await feeDistributor.checkpointUser(user2.address)
 
-                                const currentEpoch = await votingEscrow.user_point_epoch(user.address)
-                                const newLastCheckpointedEpoch = await feeDistributor.getUserLastEpochCheckpointed(user.address)
+                                const currentEpoch = await votingEscrow.user_point_epoch(user2.address)
+                                const newLastCheckpointedEpoch = await feeDistributor.getUserLastEpochCheckpointed(user2.address)
 
                                 expect(newLastCheckpointedEpoch).to.be.eq(currentEpoch)
                             })
                         })
                     })
 
-                    context('when the user has not been checkpointed this week', () => {
-                        beforeEach('advance time past startTime', async () => {
+                    context("when the user has not been checkpointed this week", () => {
+                        beforeEach("advance time past startTime", async () => {
                             await advanceToTimestamp(startTime.add(WEEK).add(1))
 
                             start = await currentTimestamp()
                         })
 
                         context("when user hasn't checkpointed in a small number of weeks", () => {
-                            beforeEach('set end timestamp', async () => {
+                            beforeEach("set end timestamp", async () => {
                                 end = start.add(8 * WEEK - 1)
                             })
 
-                            context('when user locked prior to the beginning of the week', () => {
-                                beforeEach('set user', async () => {
+                            context("when user locked prior to the beginning of the week", () => {
+                                beforeEach("set user", async () => {
                                     user = user1
                                 })
 
-                                context('when the user receives a small number of checkpoints', () => {
+                                context("when the user receives a small number of checkpoints", () => {
                                     testCheckpoint(2)
                                 })
 
-                                context('when the user receives enough checkpoints they cannot fully sync', () => {
+                                context("when the user receives enough checkpoints they cannot fully sync", () => {
                                     testCheckpoint(10)
                                 })
                             })
@@ -387,20 +387,20 @@ describe('FeeDistributor', function () {
             })
         })
 
-        describe('token checkpoint', () => {
+        describe("token checkpoint", () => {
             let tokens: Contract[]
             let tokenAmounts: BigNumber[]
             let tokenAddresses: string[]
 
             function itCheckpointsTokensCorrectly(checkpointTokens: () => Promise<ContractTransaction>): void {
-                context('when startTime has not passed', () => {
-                    it('reverts', async () => {
-                        await expect(checkpointTokens()).to.be.revertedWith('Fee distribution has not started yet')
+                context("when startTime has not passed", () => {
+                    it("reverts", async () => {
+                        await expect(checkpointTokens()).to.be.revertedWith("Fee distribution has not started yet")
                     })
                 })
 
-                context('when startTime has passed', () => {
-                    beforeEach('advance time past startTime', async () => {
+                context("when startTime has passed", () => {
+                    beforeEach("advance time past startTime", async () => {
                         await advanceToTimestamp(startTime.add(100))
                     })
 
@@ -415,7 +415,7 @@ describe('FeeDistributor', function () {
                     })
 
                     context("when FeeDistributor hasn't received new tokens", () => {
-                        beforeEach('send tokens and checkpoint', async () => {
+                        beforeEach("send tokens and checkpoint", async () => {
                             for (let i = 0; i < tokens.length; i++) {
                                 await tokens[i].mint(feeDistributor.address, tokenAmounts[i])
                             }
@@ -423,7 +423,7 @@ describe('FeeDistributor', function () {
                             await feeDistributor.checkpointTokens(tokens.map((token) => token.address))
                         })
 
-                        it('maintains the same cached balance', async () => {
+                        it("maintains the same cached balance", async () => {
                             const expectedTokenLastBalances = await Promise.all(
                                 tokens.map((token) => feeDistributor.getTokenLastBalance(token.address))
                             )
@@ -435,14 +435,14 @@ describe('FeeDistributor', function () {
                         })
                     })
 
-                    context('when FeeDistributor has received new tokens', () => {
-                        beforeEach('send tokens', async () => {
+                    context("when FeeDistributor has received new tokens", () => {
+                        beforeEach("send tokens", async () => {
                             for (let i = 0; i < tokens.length; i++) {
                                 await tokens[i].mint(feeDistributor.address, tokenAmounts[i])
                             }
                         })
 
-                        it('updates the cached balance by the amount of new tokens received', async () => {
+                        it("updates the cached balance by the amount of new tokens received", async () => {
                             const previousTokenLastBalances = await Promise.all(
                                 tokens.map((token) => feeDistributor.getTokenLastBalance(token.address))
                             )
@@ -460,20 +460,20 @@ describe('FeeDistributor', function () {
                 })
             }
 
-            describe('checkpointToken', () => {
-                beforeEach('Deploy protocol fee token', async () => {
+            describe("checkpointToken", () => {
+                beforeEach("Deploy protocol fee token", async () => {
                     tokens = [rewardsToken]
-                    tokenAmounts = [ethers.utils.parseEther('1000')]
+                    tokenAmounts = [ethers.utils.parseEther("1000")]
                     tokenAddresses = [rewardsToken.address]
                 })
 
                 itCheckpointsTokensCorrectly(() => feeDistributor.checkpointToken(tokens[0].address))
             })
 
-            describe('checkpointTokens', () => {
-                beforeEach('Deploy protocol fee token', async () => {
+            describe("checkpointTokens", () => {
+                beforeEach("Deploy protocol fee token", async () => {
                     tokens = [rewardsToken, rewardsToken2]
-                    tokenAmounts = [ethers.utils.parseEther('1000'), ethers.utils.parseEther('2000')]
+                    tokenAmounts = [ethers.utils.parseEther("1000"), ethers.utils.parseEther("2000")]
                     tokenAddresses = [rewardsToken.address, rewardsToken2.address]
                 })
 
@@ -482,25 +482,25 @@ describe('FeeDistributor', function () {
         })
     })
 
-    describe('claiming', () => {
+    describe("claiming", () => {
         let tokens: Contract[]
         let tokenAmounts: BigNumber[]
-		let tokenAddresses: string[]
+        let tokenAddresses: string[]
 
         const itRevertsBeforeStartTime = (claimTokens: () => Promise<ContractTransaction>) => {
-            context('when startTime has not passed', () => {
-                it('reverts', async () => {
-                    await expect(claimTokens()).to.be.revertedWith('Fee distribution has not started yet')
+            context("when startTime has not passed", () => {
+                it("reverts", async () => {
+                    await expect(claimTokens()).to.be.revertedWith("Fee distribution has not started yet")
                 })
             })
         }
 
         function itUpdatesCheckpointsCorrectly(
             claimTokens: () => Promise<ContractTransaction>,
-            checkpointTypes: ('global' | 'user' | 'token' | 'user-token')[]
+            checkpointTypes: ("global" | "user" | "token" | "user-token")[]
         ): void {
-            if (checkpointTypes.includes('global')) {
-                it('checkpoints the global state', async () => {
+            if (checkpointTypes.includes("global")) {
+                it("checkpoints the global state", async () => {
                     const nextWeek = roundUpTimestamp(await currentTimestamp())
                     await claimTokens()
 
@@ -508,8 +508,8 @@ describe('FeeDistributor', function () {
                 })
             }
 
-            if (checkpointTypes.includes('token')) {
-                it('checkpoints the token state', async () => {
+            if (checkpointTypes.includes("token")) {
+                it("checkpoints the token state", async () => {
                     const previousTimeCursors = await Promise.all(tokens.map((token) => feeDistributor.getTokenTimeCursor(token.address)))
                     const tx = await claimTokens()
                     const txTimestamp = await receiptTimestamp(tx.wait())
@@ -531,8 +531,8 @@ describe('FeeDistributor', function () {
                 })
             }
 
-            if (checkpointTypes.includes('user')) {
-                it('checkpoints the user state', async () => {
+            if (checkpointTypes.includes("user")) {
+                it("checkpoints the user state", async () => {
                     const nextWeek = roundUpTimestamp(await currentTimestamp())
 
                     await claimTokens()
@@ -540,8 +540,8 @@ describe('FeeDistributor', function () {
                 })
             }
 
-            if (checkpointTypes.includes('user-token')) {
-                it('updates the token time cursor for the user to the latest claimed week', async () => {
+            if (checkpointTypes.includes("user-token")) {
+                it("updates the token time cursor for the user to the latest claimed week", async () => {
                     const thisWeek = roundDownTimestamp(await currentTimestamp())
 
                     await claimTokens()
@@ -553,7 +553,7 @@ describe('FeeDistributor', function () {
         }
 
         function itClaimsNothing(claimTokens: () => Promise<ContractTransaction>, simulateClaimTokens: () => Promise<BigNumber[]>): void {
-            it('maintains the same cached balance', async () => {
+            it("maintains the same cached balance", async () => {
                 const expectedTokenLastBalances = await Promise.all(tokens.map((token) => feeDistributor.getTokenLastBalance(token.address)))
                 await claimTokens()
 
@@ -562,13 +562,13 @@ describe('FeeDistributor', function () {
                 }
             })
 
-            it('returns zero', async () => {
+            it("returns zero", async () => {
                 expect(await simulateClaimTokens()).to.be.eql(tokenAmounts.map(() => BigNumber.from(0)))
             })
         }
 
         function itClaimsTokensCorrectly(claimTokens: () => Promise<ContractTransaction>): void {
-            it('transfers tokens to the user', async () => {
+            it("transfers tokens to the user", async () => {
                 const balancesBefore = await Promise.all(tokens.map((token) => token.balanceOf(user1.address)))
                 await claimTokens()
                 const balancesAfter = await Promise.all(tokens.map((token) => token.balanceOf(user1.address)))
@@ -578,7 +578,7 @@ describe('FeeDistributor', function () {
                 }
             })
 
-            it('subtracts the number of tokens claimed from the cached balance', async () => {
+            it("subtracts the number of tokens claimed from the cached balance", async () => {
                 const previousTokenLastBalances = await Promise.all(tokens.map((token) => feeDistributor.getTokenLastBalance(token.address)))
                 await claimTokens()
                 const newTokenLastBalances = await Promise.all(tokens.map((token) => feeDistributor.getTokenLastBalance(token.address)))
@@ -589,36 +589,36 @@ describe('FeeDistributor', function () {
             })
         }
 
-        describe('claimToken', () => {
-            beforeEach('Deploy protocol fee token', async () => {
+        describe("claimToken", () => {
+            beforeEach("Deploy protocol fee token", async () => {
                 tokens = [rewardsToken]
-                tokenAmounts = tokens.map(() => ethers.utils.parseEther('1'))
-				tokenAddresses = [rewardsToken.address]
+                tokenAmounts = tokens.map(() => ethers.utils.parseEther("1"))
+                tokenAddresses = [rewardsToken.address]
             })
 
-            context('when performing the first claim', () => {
+            context("when performing the first claim", () => {
                 itRevertsBeforeStartTime(() => feeDistributor.claimToken(user1.address, rewardsToken.address))
 
-                context('when startTime has passed', () => {
-                    beforeEach('advance time past startTime', async () => {
+                context("when startTime has passed", () => {
+                    beforeEach("advance time past startTime", async () => {
                         await advanceToTimestamp(startTime.add(100))
                     })
 
                     itUpdatesCheckpointsCorrectly(
                         () => feeDistributor.claimToken(user1.address, rewardsToken.address),
-                        ['global', 'token', 'user', 'user-token']
+                        ["global", "token", "user", "user-token"]
                     )
 
                     // Return values from static-calling claimToken need to be converted into array format to standardise test code.
-                    context('when there are no tokens to distribute to user', () => {
+                    context("when there are no tokens to distribute to user", () => {
                         itClaimsNothing(
                             () => feeDistributor.claimToken(user1.address, rewardsToken.address),
                             async () => [await feeDistributor.callStatic.claimToken(user1.address, rewardsToken.address)]
                         )
                     })
 
-                    context('when there are tokens to distribute to user', () => {
-                        beforeEach('send tokens', async () => {
+                    context("when there are tokens to distribute to user", () => {
+                        beforeEach("send tokens", async () => {
                             for (let i = 0; i < tokens.length; i++) {
                                 await tokens[i].mint(feeDistributor.address, tokenAmounts[i])
                             }
@@ -630,12 +630,38 @@ describe('FeeDistributor', function () {
                         })
 
                         itClaimsTokensCorrectly(() => feeDistributor.claimToken(user1.address, rewardsToken.address))
+
+                        context("when veSTG balance is zero", () => {
+                            it("reverts", async () => {
+                                await expect(feeDistributor.claimToken(other.address, rewardsToken.address)).to.be.revertedWith(
+                                    "veSTG balance is zero"
+                                )
+                            })
+                        })
+
+                        context("when only VotingEscrow holder can claim", () => {
+                            beforeEach("enable claiming only by VotingEscrow holder", async () => {
+                                await feeDistributor.connect(user1).enableOnlyVeHolderClaiming(true)
+                            })
+
+                            context("when called by a third-party", () => {
+                                it("reverts", async () => {
+                                    await expect(
+                                        feeDistributor.connect(other).claimToken(user1.address, rewardsToken.address)
+                                    ).to.be.revertedWith("Claiming is not allowed")
+                                })
+                            })
+
+                            context("when called by the VotingEscrow holder", () => {
+                                itClaimsTokensCorrectly(() => feeDistributor.connect(user1).claimToken(user1.address, rewardsToken.address))
+                            })
+                        })
                     })
                 })
             })
 
-            context('when performing future claims', () => {
-                beforeEach('perform the first claim', async () => {
+            context("when performing future claims", () => {
+                beforeEach("perform the first claim", async () => {
                     await advanceToTimestamp(startTime.add(1))
                     const tx = await feeDistributor.claimToken(user1.address, rewardsToken.address)
                     const txTimestamp = await receiptTimestamp(tx.wait())
@@ -650,20 +676,20 @@ describe('FeeDistributor', function () {
                     expectTimestampsMatch(await feeDistributor.getUserTokenTimeCursor(user1.address, rewardsToken.address), thisWeek)
                 })
 
-                context('when the user has many checkpoints', () => {
-                    beforeEach('create many checkpoints', async () => {
+                context("when the user has many checkpoints", () => {
+                    beforeEach("create many checkpoints", async () => {
                         // Creating many checkpoints now would prevent the user from checkpointing startTime+WEEK, which is only
                         // claimable at startTime+2*WEEK.
 
                         const NUM_CHECKPOINTS = 100
                         for (let i = 0; i < NUM_CHECKPOINTS; i++) {
-                            await depositForUser(user1, utils.parseEther('1'))
+                            await depositForUser(user1, utils.parseEther("1"))
                         }
                         await advanceToTimestamp(startTime.add(WEEK).add(1))
                     })
 
-                    context('when there are tokens to distribute to user', () => {
-                        beforeEach('send tokens', async () => {
+                    context("when there are tokens to distribute to user", () => {
+                        beforeEach("send tokens", async () => {
                             await feeDistributor.checkpointTokens(tokenAddresses)
                             for (let i = 0; i < tokens.length; i++) {
                                 await tokens[i].mint(feeDistributor.address, tokenAmounts[i])
@@ -677,7 +703,7 @@ describe('FeeDistributor', function () {
 
                         itUpdatesCheckpointsCorrectly(
                             () => feeDistributor.claimToken(user1.address, rewardsToken.address),
-                            ['global', 'user', 'token', 'user-token']
+                            ["global", "user", "token", "user-token"]
                         )
 
                         itClaimsTokensCorrectly(() => feeDistributor.claimToken(user1.address, rewardsToken.address))
@@ -686,35 +712,35 @@ describe('FeeDistributor', function () {
             })
         })
 
-        describe('claimTokens', () => {
-            beforeEach('Deploy protocol fee token', async () => {
+        describe("claimTokens", () => {
+            beforeEach("Deploy protocol fee token", async () => {
                 tokens = [rewardsToken, rewardsToken2]
-                tokenAmounts = [ethers.utils.parseEther('1000'), ethers.utils.parseEther('2000')]
-				tokenAddresses = [rewardsToken.address, rewardsToken2.address]
+                tokenAmounts = [ethers.utils.parseEther("1000"), ethers.utils.parseEther("2000")]
+                tokenAddresses = [rewardsToken.address, rewardsToken2.address]
             })
 
-            context('when performing the first claim', () => {
+            context("when performing the first claim", () => {
                 itRevertsBeforeStartTime(() => feeDistributor.claimTokens(user1.address, tokenAddresses))
 
-                context('when startTime has passed', () => {
-                    beforeEach('advance time past startTime', async () => {
+                context("when startTime has passed", () => {
+                    beforeEach("advance time past startTime", async () => {
                         await advanceToTimestamp(startTime.add(100))
                     })
 
                     itUpdatesCheckpointsCorrectly(
                         () => feeDistributor.claimTokens(user1.address, tokenAddresses),
-                        ['global', 'token', 'user', 'user-token']
+                        ["global", "token", "user", "user-token"]
                     )
 
-                    context('when there are no tokens to distribute to user', () => {
+                    context("when there are no tokens to distribute to user", () => {
                         itClaimsNothing(
                             () => feeDistributor.claimTokens(user1.address, tokenAddresses),
                             () => feeDistributor.callStatic.claimTokens(user1.address, tokenAddresses)
                         )
                     })
 
-                    context('when there are tokens to distribute to user', () => {
-                        beforeEach('send tokens', async () => {
+                    context("when there are tokens to distribute to user", () => {
+                        beforeEach("send tokens", async () => {
                             for (let i = 0; i < tokens.length; i++) {
                                 await tokens[i].mint(feeDistributor.address, tokenAmounts[i])
                             }
@@ -726,8 +752,63 @@ describe('FeeDistributor', function () {
                         })
 
                         itClaimsTokensCorrectly(() => feeDistributor.claimTokens(user1.address, tokenAddresses))
+
+                        context("when only VotingEscrow holder can claim", () => {
+                            beforeEach("enable claiming only by VotingEscrow holder", async () => {
+                                await feeDistributor.connect(user1).enableOnlyVeHolderClaiming(true)
+                            })
+
+                            context("when called by a third-party", () => {
+                                it("reverts", async () => {
+                                    await expect(feeDistributor.connect(other).claimTokens(user1.address, tokenAddresses)).to.be.revertedWith(
+                                        "Claiming is not allowed"
+                                    )
+                                })
+                            })
+
+                            context("when called by the VotingEscrow holder", () => {
+                                itClaimsTokensCorrectly(() => feeDistributor.connect(user1).claimTokens(user1.address, tokenAddresses))
+                            })
+                        })
                     })
                 })
+            })
+        })
+    })
+
+    describe("withdrawing", () => {
+        const amount = ethers.utils.parseEther("1")
+        beforeEach("advance time past startTime", async () => {
+            await advanceToTimestamp(startTime.add(100))
+        })
+
+        beforeEach("send tokens", async () => {
+            await feeDistributor.checkpointToken(rewardsToken.address)
+            await rewardsToken.mint(feeDistributor.address, amount)
+            await feeDistributor.checkpointToken(rewardsToken.address)
+
+            // For the week to become claimable we must wait until the next week starts
+            const nextWeek = roundUpTimestamp(await currentTimestamp())
+            await advanceToTimestamp(nextWeek.add(1))
+        })
+
+        context("when called by a non-owner", () => {
+            it("reverts", async () => {
+                await expect(feeDistributor.connect(user1).withdrawToken(rewardsToken.address, amount, user1.address)).to.be.revertedWith(
+                    "Ownable: caller is not the owner"
+                )
+            })
+        })
+
+        context("when called by the owner", () => {
+            beforeEach("transfer ownership", async () => {
+                await feeDistributor.transferOwnership(user1.address)
+            })
+
+            it("withdraws", async () => {
+                expect(await rewardsToken.balanceOf(user1.address)).to.be.eq(0)
+                await feeDistributor.connect(user1).withdrawToken(rewardsToken.address, amount, user1.address)
+                expect(await rewardsToken.balanceOf(user1.address)).to.be.eq(amount)
             })
         })
     })
