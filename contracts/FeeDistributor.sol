@@ -104,12 +104,6 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
         startTime = _roundDownTimestamp(startTime);
         uint256 currentWeek = _roundDownTimestamp(block.timestamp);
         require(startTime >= currentWeek, "Cannot start before current week");
-        if (startTime == currentWeek) {
-            // We assume that `votingEscrow` has been deployed in a week previous to this one.
-            // If `votingEscrow` did not have a non-zero supply at the beginning of the current week
-            // then any tokens which are distributed this week will be lost permanently.
-            require(votingEscrow.totalSupplyAtT(currentWeek) > 0, "Zero total supply results in lost tokens");
-        }
 
         IVotingEscrow.Point memory pt = votingEscrow.point_history(0);
         require(startTime > pt.ts, "Cannot start before VotingEscrow first epoch");
@@ -758,6 +752,6 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      * @dev Reverts if the provided token cannot be claimed.
      */
     function _checkIfClaimingEnabled(IERC20 token) private view {
-        require(_tokenClaimingEnabled[token], "Token isn't allowed");
+        require(_tokenClaimingEnabled[token], "Token is not allowed");
     }
 }
