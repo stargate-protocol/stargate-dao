@@ -85,6 +85,9 @@ describe("FeeDistributor", function () {
 
         expect(await votingEscrow.balanceOf(user1.address)).to.be.gt(0, "zero VotingEscrow balance")
         expect(await votingEscrow.totalSupply()).to.be.gt(0, "zero VotingEscrow supply")
+
+        await feeDistributor.enableTokenClaiming(rewardsToken.address, true)
+        await feeDistributor.enableTokenClaiming(rewardsToken2.address, true)
     })
 
     describe("constructor", () => {
@@ -468,6 +471,16 @@ describe("FeeDistributor", function () {
                 })
 
                 itCheckpointsTokensCorrectly(() => feeDistributor.checkpointToken(tokens[0].address))
+
+                context("when claiming is disabled for a token", () => {
+                    beforeEach("disable token claiming", async () => {
+                        await feeDistributor.enableTokenClaiming(rewardsToken.address, false)
+                    })
+
+                    it("reverts", async () => {
+                        await expect(feeDistributor.checkpointToken(tokens[0].address)).to.be.revertedWith("Token isn't allowed")
+                    })
+                })
             })
 
             describe("checkpointTokens", () => {
@@ -478,6 +491,17 @@ describe("FeeDistributor", function () {
                 })
 
                 itCheckpointsTokensCorrectly(() => feeDistributor.checkpointTokens(tokenAddresses))
+
+                context("when claiming is disabled for tokens", () => {
+                    beforeEach("disable token claiming", async () => {
+                        await feeDistributor.enableTokenClaiming(tokens[0].address, false)
+                        await feeDistributor.enableTokenClaiming(tokens[1].address, false)
+                    })
+
+                    it("reverts", async () => {
+                        await expect(feeDistributor.checkpointTokens(tokenAddresses)).to.be.revertedWith("Token isn't allowed")
+                    })
+                })
             })
         })
     })
@@ -656,6 +680,18 @@ describe("FeeDistributor", function () {
                                 itClaimsTokensCorrectly(() => feeDistributor.connect(user1).claimToken(user1.address, rewardsToken.address))
                             })
                         })
+
+                        context("when claiming is disabled for a token", () => {
+                            beforeEach("disable token claiming", async () => {
+                                await feeDistributor.enableTokenClaiming(rewardsToken.address, false)
+                            })
+
+                            it("reverts", async () => {
+                                await expect(feeDistributor.claimToken(user1.address, rewardsToken.address)).to.be.revertedWith(
+                                    "Token isn't allowed"
+                                )
+                            })
+                        })
                     })
                 })
             })
@@ -768,6 +804,19 @@ describe("FeeDistributor", function () {
 
                             context("when called by the VotingEscrow holder", () => {
                                 itClaimsTokensCorrectly(() => feeDistributor.connect(user1).claimTokens(user1.address, tokenAddresses))
+                            })
+                        })
+
+                        context("when claiming is disabled for tokens", () => {
+                            beforeEach("disable token claiming", async () => {
+                                await feeDistributor.enableTokenClaiming(tokens[0].address, false)
+                                await feeDistributor.enableTokenClaiming(tokens[1].address, false)
+                            })
+
+                            it("reverts", async () => {
+                                await expect(feeDistributor.connect(user1).claimTokens(user1.address, tokenAddresses)).to.be.revertedWith(
+                                    "Token isn't allowed"
+                                )
                             })
                         })
                     })

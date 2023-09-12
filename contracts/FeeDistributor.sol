@@ -50,6 +50,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
     }
     mapping(IERC20 => TokenState) private _tokenState;
     mapping(IERC20 => mapping(uint256 => uint256)) private _tokensPerWeek;
+    mapping(IERC20 => bool) private _tokenClaimingEnabled;
 
     // User State
 
@@ -67,11 +68,32 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
 
     /**
      * @dev Reverts if only the VotingEscrow holder can claim their rewards and the given address is a third-party caller.
-     * @param user - Address to validate as the only allowed caller.
+     * @param user - The address to validate as the only allowed caller.
      */
-    modifier allowedToClaim(address user) {
+    modifier userAllowedToClaim(address user) {
         if (_onlyVeHolderClaimingEnabled[user]) {
             require(msg.sender == user, "Claiming is not allowed");
+        }
+        _;
+    }
+
+    /**
+     * @dev Reverts if the given token cannot be claimed.
+     * @param token - The token to check.
+     */
+    modifier tokenCanBeClaimed(IERC20 token) {
+        _checkIfClaimingEnabled(token);
+        _;
+    }
+
+    /**
+     * @dev Reverts if the given tokens cannot be claimed.
+     * @param tokens - The tokens to check.
+     */
+    modifier tokensCanBeClaimed(IERC20[] calldata tokens) {
+        uint256 tokensLength = tokens.length;
+        for (uint256 i = 0; i < tokensLength; ++i) {
+            _checkIfClaimingEnabled(tokens[i]);
         }
         _;
     }
@@ -82,12 +104,6 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
         startTime = _roundDownTimestamp(startTime);
         uint256 currentWeek = _roundDownTimestamp(block.timestamp);
         require(startTime >= currentWeek, "Cannot start before current week");
-        if (startTime == currentWeek) {
-            // We assume that `votingEscrow` has been deployed in a week previous to this one.
-            // If `votingEscrow` did not have a non-zero supply at the beginning of the current week
-            // then any tokens which are distributed this week will be lost permanently.
-            require(votingEscrow.totalSupplyAtT(currentWeek) > 0, "Zero total supply results in lost tokens");
-        }
 
         IVotingEscrow.Point memory pt = votingEscrow.point_history(0);
         require(startTime > pt.ts, "Cannot start before VotingEscrow first epoch");
@@ -139,6 +155,14 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      */
     function getUserLastEpochCheckpointed(address user) external view override returns (uint256) {
         return _userState[user].lastEpochCheckpointed;
+    }
+
+    /**
+     * @notice True if the given token can be claimed, false otherwise.
+     * @param token - The ERC20 token address to query.
+     */
+    function canTokenBeClaimed(IERC20 token) external view override returns (bool) {
+        return _tokenClaimingEnabled[token];
     }
 
     /**
@@ -241,7 +265,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      * @param token - The ERC20 token address to distribute.
      * @param amount - The amount of tokens to deposit.
      */
-    function depositToken(IERC20 token, uint256 amount) external override nonReentrant {
+    function depositToken(IERC20 token, uint256 amount) external override nonReentrant tokenCanBeClaimed(token) {
         _checkpointToken(token, false);
         token.safeTransferFrom(msg.sender, address(this), amount);
         _checkpointToken(token, true);
@@ -259,6 +283,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
 
         uint256 length = tokens.length;
         for (uint256 i = 0; i < length; ++i) {
+            _checkIfClaimingEnabled(tokens[i]);
             _checkpointToken(tokens[i], false);
             tokens[i].safeTransferFrom(msg.sender, address(this), amounts[i]);
             _checkpointToken(tokens[i], true);
@@ -292,7 +317,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      * This function will be called automatically before claiming tokens to ensure the contract is properly updated.
      * @param token - The ERC20 token address to be checkpointed.
      */
-    function checkpointToken(IERC20 token) external override nonReentrant {
+    function checkpointToken(IERC20 token) external override nonReentrant tokenCanBeClaimed(token) {
         _checkpointToken(token, true);
     }
 
@@ -305,6 +330,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
     function checkpointTokens(IERC20[] calldata tokens) external override nonReentrant {
         uint256 tokensLength = tokens.length;
         for (uint256 i = 0; i < tokensLength; ++i) {
+            _checkIfClaimingEnabled(tokens[i]);
             _checkpointToken(tokens[i], true);
         }
     }
@@ -319,7 +345,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      * @param token - The ERC20 token address to be claimed.
      * @return The amount of `token` sent to `user` as a result of claiming.
      */
-    function claimToken(address user, IERC20 token) external override nonReentrant allowedToClaim(user) returns (uint256) {
+    function claimToken(address user, IERC20 token) external override nonReentrant userAllowedToClaim(user) tokenCanBeClaimed(token) returns (uint256) {
         _checkpointTotalSupply();
         _checkpointUserBalance(user);
         _checkpointToken(token, false);
@@ -335,7 +361,7 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      * @param tokens - An array of ERC20 token addresses to be claimed.
      * @return An array of the amounts of each token in `tokens` sent to `user` as a result of claiming.
      */
-    function claimTokens(address user, IERC20[] calldata tokens) external override nonReentrant allowedToClaim(user) returns (uint256[] memory) {
+    function claimTokens(address user, IERC20[] calldata tokens) external override nonReentrant userAllowedToClaim(user) tokensCanBeClaimed(tokens) returns (uint256[] memory) {
         _checkpointTotalSupply();
         _checkpointUserBalance(user);
 
@@ -357,8 +383,19 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
      * @param amount - The amount to withdraw.
      * @param recipient - The address to transfer the tokens to.
      */
-    function withdrawToken(IERC20 token, uint256 amount, address recipient) external onlyOwner {
+    function withdrawToken(IERC20 token, uint256 amount, address recipient) external override onlyOwner {
         token.safeTransfer(recipient, amount);
+        emit TokenWithdrawn(token, amount, recipient);
+    }
+
+    /**
+     * @notice Enables or disables claiming of the given token. Can be called only by Stargate DAO.
+     * @param token - The token to enable or disable claiming.
+     * @param enable - True if the token can be claimed, false otherwise.
+     */
+    function enableTokenClaiming(IERC20 token, bool enable) external override onlyOwner {
+        _tokenClaimingEnabled[token] = enable;
+        emit TokenClaimingEnabled(token, enable);
     }
 
     // Internal functions
@@ -709,5 +746,12 @@ contract FeeDistributor is IFeeDistributor, Ownable, ReentrancyGuard {
     function _roundUpTimestamp(uint256 timestamp) private pure returns (uint256) {
         // Overflows are impossible here for all realistic inputs.
         return _roundDownTimestamp(timestamp + WEEK_MINUS_SECOND);
+    }
+
+    /**
+     * @dev Reverts if the provided token cannot be claimed.
+     */
+    function _checkIfClaimingEnabled(IERC20 token) private view {
+        require(_tokenClaimingEnabled[token], "Token is not allowed");
     }
 }

@@ -16,6 +16,8 @@ import "./IVotingEscrow.sol";
 interface IFeeDistributor {
     event TokenCheckpointed(IERC20 token, uint256 amount, uint256 lastCheckpointTimestamp);
     event TokensClaimed(address user, IERC20 token, uint256 amount, uint256 userTokenTimeCursor);
+    event TokenWithdrawn(IERC20 token, uint256 amount, address recipient);
+    event TokenClaimingEnabled(IERC20 token, bool enabled);
     event OnlyVeHolderClaimingEnabled(address user, bool enabled);
 
     /**
@@ -44,6 +46,12 @@ interface IFeeDistributor {
      * @param user - The address of the user to query.
      */
     function getUserStartTime(address user) external view returns (uint256);
+
+    /**
+     * @notice True if the given token can be claimed, false otherwise.
+     * @param token - The ERC20 token address to query.
+     */
+    function canTokenBeClaimed(IERC20 token) external view returns (bool);
 
     /**
      * @notice Returns the token-level start time representing the timestamp users could start claiming this token
@@ -195,4 +203,21 @@ interface IFeeDistributor {
      * @return An array of the amounts of each token in `tokens` sent to `user` as a result of claiming.
      */
     function claimTokens(address user, IERC20[] calldata tokens) external returns (uint256[] memory);
+
+    // Governance
+
+    /**
+     * @notice Withdraws the specified `amount` of the `token` from the contract to the `recipient`. Can be called only by Stargate DAO.
+     * @param token - The token to withdraw.
+     * @param amount - The amount to withdraw.
+     * @param recipient - The address to transfer the tokens to.
+     */
+    function withdrawToken(IERC20 token, uint256 amount, address recipient) external;
+
+    /**
+     * @notice Enables or disables claiming of the given token. Can be called only by Stargate DAO.
+     * @param token - The token to enable or disable claiming.
+     * @param enable - True if the token can be claimed, false otherwise.
+     */
+    function enableTokenClaiming(IERC20 token, bool enable) external;
 }
