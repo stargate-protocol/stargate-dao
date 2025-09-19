@@ -41,6 +41,13 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
     event TokensClaimed(address indexed user, IERC20 indexed token, uint256 amount, uint256 newUserTokenTimeCursor);
     event TokenWithdrawn(IERC20 token, uint256 amount, address recipient);
 
+    struct TokenStateView {
+        uint256 lastTokenTime;
+        uint256 timeSinceLastTokenCheckpoint;
+        uint256 tokenTimeCursor;
+        bool tokenWouldEarlyReturn;
+    }
+
     /* -------------------- Modifiers (match old semantics) -------------------- */
     modifier userAllowedToClaim(address user) {
         // If old contract enforces "only ve holder can claim", mirror the behavior
@@ -74,7 +81,7 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
         emit TokenWithdrawn(token, amount, recipient);
     }
 
-    /* -------------------- Public getters (mirroring names) -------------------- */
+    /* -------------------- Public getters -------------------- */
 
     // Mirror-style getter so you can inspect our local cursor
     function getUserTokenTimeCursor(address user, IERC20 token) external view returns (uint256) {
@@ -90,7 +97,7 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
         return _oldFD;
     }
 
-    /* -------------------- Claiming (same function names & shape) -------------------- */
+    /* -------------------- Claiming -------------------- */
 
     /**
      * @notice Claims all pending distributions of `token` for `user`, funded by this contract,
@@ -98,60 +105,136 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
      * @dev    Mirrors the structure of the original claimToken (minus checkpoints).
      */
     function claimToken(address user, IERC20 token) external nonReentrant userAllowedToClaim(user) tokenCanBeClaimed(token) returns (uint256) {
-        // NOTE: We intentionally DO NOT call:
-        //   _checkpointTotalSupply();
-        //   _checkpointUserBalance(user);
-        //   _checkpointToken(token, false);
-        // Since they mutate the old contract's storage so claims are accurate going forward.
-        return _claimToken(user, token);
+        // mirrors: _timeCursor, _userState[user].timeCursor, tokenState.timeCursor
+        uint256 timeCursor = _checkpointTotalSupply(); // as-if
+        uint256 userTimeCursor = _checkpointUserBalance(user); // as-if
+
+        TokenStateView memory tsv = _checkpointToken(token, false); // as-if
+
+        return _claimToken(user, token, timeCursor, userTimeCursor, tsv);
     }
 
     /**
      * @notice Batch version, same signature idea as the old `claimTokens`.
      */
     function claimTokens(address user, IERC20[] calldata tokens) external nonReentrant userAllowedToClaim(user) tokensCanBeClaimed(tokens) returns (uint256[] memory) {
-        uint256 len = tokens.length;
-        uint256[] memory amounts = new uint256[](len);
-        for (uint256 i = 0; i < len; ++i) {
-            amounts[i] = _claimToken(user, tokens[i]);
+        uint256 timeCursor = _checkpointTotalSupply();
+        uint256 userTimeCursor = _checkpointUserBalance(user);
+
+        uint256 tokensLength = tokens.length;
+        uint256[] memory amounts = new uint256[](tokensLength);
+
+        for (uint256 i = 0; i < tokensLength; ++i) {
+            TokenStateView memory tsv = _checkpointToken(tokens[i], false);
+            amounts[i] = _claimToken(user, tokens[i], timeCursor, userTimeCursor, tsv);
         }
         return amounts;
     }
 
-    /* -------------------- Internal logic (mirrors old _claimToken) -------------------- */
+    /* -------------------- Internal functions -------------------- */
 
-    function _claimToken(address user, IERC20 token) internal returns (uint256) {
-        // Establish starting week: our local cursor or (first time) old.getUserTokenTimeCursor
+    function _claimToken(address user, IERC20 token, uint256 timeCursor, uint256 userTimeCursor, TokenStateView memory tsv) private returns (uint256) {
+        require(block.timestamp > _oldFD.getStartTime(), "Fee distribution has not started yet");
+
         uint256 nextUserTokenWeekToClaim = _userTokenTimeCursor[user][token];
         if (nextUserTokenWeekToClaim == 0) {
-            nextUserTokenWeekToClaim = _oldFD.getUserTokenTimeCursor(user, token);
+            uint256 oldCursor = _oldFD.getUserTokenTimeCursor(user, token);
+            if (oldCursor != 0) {
+                nextUserTokenWeekToClaim = oldCursor;
+            } else {
+                nextUserTokenWeekToClaim = _initialUserStartWeek(user);
+                uint256 ts = _oldFD.getTokenStartTime(token);
+                if (ts > nextUserTokenWeekToClaim) nextUserTokenWeekToClaim = ts;
+            }
         }
 
-        // Compute firstUnclaimableWeek exactly like the old contract:
-        // min( roundUp(min(globalCursor, userCursor)), roundDown(tokenCursor) )
-        uint256 firstUnclaimableWeek = _min(_roundUpTimestamp(_min(_oldFD.getTimeCursor(), _oldFD.getUserTimeCursor(user))), _roundDownTimestamp(_oldFD.getTokenTimeCursor(token)));
+        // EXACT same one-liner as original
+        uint256 firstUnclaimableWeek = _min(_roundUpTimestamp(_min(timeCursor, userTimeCursor)), _roundDownTimestamp(tsv.tokenTimeCursor));
 
         uint256 amount;
-        // Same structure: iterate weeks up to a gas-friendly cap (20), break when we reach the bound
         for (uint256 i = 0; i < 20; ++i) {
-            // We clearly cannot claim for `firstUnclaimableWeek` and so we break here.
             if (nextUserTokenWeekToClaim >= firstUnclaimableWeek) break;
 
-            amount += (_oldFD.getTokensDistributedInWeek(token, nextUserTokenWeekToClaim) * _oldFD.getUserBalanceAtTimestamp(user, nextUserTokenWeekToClaim)) / _oldFD.getTotalSupplyAtTimestamp(nextUserTokenWeekToClaim);
+            uint256 tokensPerWeek = _oldFD.getTokensDistributedInWeek(token, nextUserTokenWeekToClaim);
 
+            // Use the old FD’s weekly snapshots (not live VE calls)
+            uint256 userBal = _veBalanceOfAt(user, nextUserTokenWeekToClaim); // FD-style bias - slope*dt
+            uint256 veSupply = _veTotalSupplyAt(nextUserTokenWeekToClaim); // FD-style bias - slope*dt
+
+            if (veSupply == 0 || userBal == 0 || tokensPerWeek == 0) {
+                nextUserTokenWeekToClaim += 1 weeks;
+                continue;
+            }
+
+            amount += (tokensPerWeek * userBal) / veSupply;
             nextUserTokenWeekToClaim += 1 weeks;
         }
 
-        // Advance our local cursor to prevent double-claiming
         _userTokenTimeCursor[user][token] = nextUserTokenWeekToClaim;
 
-        // Pay from this contract's balance
         if (amount > 0) {
             token.safeTransfer(user, amount);
         }
 
         emit TokensClaimed(user, token, amount, nextUserTokenWeekToClaim);
         return amount;
+    }
+
+    function _checkpointTotalSupply() private view returns (uint256 _timeCursor) {
+        _timeCursor = _oldFD.getTimeCursor();
+        uint256 weekStart = _roundDownTimestamp(block.timestamp);
+        if (!(_timeCursor > weekStart || weekStart == block.timestamp)) {
+            _timeCursor = weekStart + 1 weeks;
+        }
+    }
+
+    function _checkpointUserBalance(address user) private view returns (uint256 _userTimeCursor) {
+        require(_ve.user_point_epoch(user) > 0, "veSTG balance is zero");
+
+        _userTimeCursor = _oldFD.getUserTimeCursor(user);
+        if (_userTimeCursor == 0) {
+            // find epoch containing FeeDistributor.startTime (same anchor the old uses)
+            uint256 maxUserEpoch = _ve.user_point_epoch(user);
+            uint256 min = 0;
+            uint256 max = maxUserEpoch;
+            uint256 startTime = _oldFD.getStartTime();
+
+            IVotingEscrow.Point memory nextUserPoint;
+            for (uint256 i = 0; i < 128; ++i) {
+                if (min >= max) break;
+                uint256 mid = (min + max + 2) / 2;
+                nextUserPoint = _ve.user_point_history(user, mid);
+                if (nextUserPoint.ts <= startTime) {
+                    min = mid;
+                } else {
+                    max = mid - 1;
+                }
+            }
+            uint256 userEpoch = min == 0 ? 1 : min;
+            nextUserPoint = _ve.user_point_history(user, userEpoch);
+            _userTimeCursor = _max(_oldFD.getStartTime(), _roundUpTimestamp(nextUserPoint.ts));
+        }
+
+        // Always perform the “as-if checkpointed now” bump
+        uint256 weekStart = _roundDownTimestamp(block.timestamp);
+        if (_userTimeCursor < weekStart) {
+            _userTimeCursor = weekStart + WEEK;
+        }
+    }
+
+    function _checkpointToken(IERC20 token, bool /*force*/) private view returns (TokenStateView memory s) {
+        s.lastTokenTime = _oldFD.getTokenTimeCursor(token);
+        if (s.lastTokenTime == 0) {
+            s.timeSinceLastTokenCheckpoint = 0;
+            s.tokenTimeCursor = block.timestamp;
+            s.tokenWouldEarlyReturn = false;
+        } else {
+            s.timeSinceLastTokenCheckpoint = block.timestamp - s.lastTokenTime;
+            bool alreadyThisWeek = _roundDownTimestamp(block.timestamp) == _roundDownTimestamp(s.lastTokenTime);
+            bool nearingEnd = (_roundUpTimestamp(block.timestamp) - block.timestamp) < 1 days;
+            s.tokenWouldEarlyReturn = (alreadyThisWeek && !nearingEnd); // force=false
+            s.tokenTimeCursor = s.tokenWouldEarlyReturn ? s.lastTokenTime : block.timestamp;
+        }
     }
 
     /* -------------------- Helpers (same names as old) -------------------- */
@@ -169,7 +252,80 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
         return a < b ? a : b;
     }
 
+    /* does the same as Math.max */
+    function _max(uint256 a, uint256 b) private pure returns (uint256) {
+        return a >= b ? a : b;
+    }
+
     function _checkIfClaimingEnabled(IERC20 token) private view {
         require(_oldFD.canTokenBeClaimed(token), "Token is not allowed");
+    }
+
+    function _veTotalSupplyAt(uint256 t) private view returns (uint256) {
+        uint256 e = _findTimestampEpoch(t);
+        IVotingEscrow.Point memory pt = _ve.point_history(e);
+
+        int128 dt = t > pt.ts ? int128(t - pt.ts) : int128(0);
+        int128 supply = pt.bias - pt.slope * dt;
+        return supply > 0 ? uint256(supply) : 0;
+    }
+
+    function _veBalanceOfAt(address user, uint256 t) private view returns (uint256) {
+        uint256 maxUserEpoch = _ve.user_point_epoch(user);
+        if (maxUserEpoch == 0) return 0;
+
+        // find epoch for user with ts <= t
+        uint256 min = 0;
+        uint256 max = maxUserEpoch;
+        for (uint256 i = 0; i < 128; ++i) {
+            if (min >= max) break;
+            uint256 mid = (min + max + 2) / 2;
+            IVotingEscrow.Point memory ptm = _ve.user_point_history(user, mid);
+            if (ptm.ts <= t) {
+                min = mid;
+            } else {
+                max = mid - 1;
+            }
+        }
+
+        IVotingEscrow.Point memory pt = _ve.user_point_history(user, min == 0 ? 1 : min);
+        int128 dt = t > pt.ts ? int128(t - pt.ts) : int128(0);
+        int128 bal = pt.bias - pt.slope * dt;
+        return bal > 0 ? uint256(bal) : 0;
+    }
+
+    function _findTimestampEpoch(uint256 timestamp) private view returns (uint256) {
+        uint256 min = 0;
+        uint256 max = _ve.epoch();
+        for (uint256 i = 0; i < 128; ++i) {
+            if (min >= max) break;
+            uint256 mid = (min + max + 2) / 2;
+            IVotingEscrow.Point memory pt = _ve.point_history(mid);
+            if (pt.ts <= timestamp) {
+                min = mid;
+            } else {
+                max = mid - 1;
+            }
+        }
+        return min;
+    }
+
+    function _initialUserStartWeek(address user) private view returns (uint256) {
+        // Same anchor the old FD uses: max(startTime, roundUp(userPoint.ts))
+        uint256 startTime = _oldFD.getStartTime();
+        uint256 maxUserEpoch = _ve.user_point_epoch(user);
+        require(maxUserEpoch > 0, "veSTG balance is zero");
+
+        uint256 lo = 0;
+        uint256 hi = maxUserEpoch;
+        for (uint256 i = 0; i < 128; ++i) {
+            if (lo >= hi) break;
+            uint256 mid = (lo + hi + 2) / 2;
+            if (_ve.user_point_history(user, mid).ts <= startTime) lo = mid;
+            else hi = mid - 1;
+        }
+        if (lo == 0) lo = 1;
+        IVotingEscrow.Point memory p = _ve.user_point_history(user, lo);
+        return _max(startTime, _roundUpTimestamp(p.ts));
     }
 }
