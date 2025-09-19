@@ -1,109 +1,137 @@
 import { expect } from "chai"
 import { ethers, network } from "hardhat"
-import { REWARD_TOKEN_BY_CHAIN, PREUNLOCK_BLOCK } from "./helpers/constants"
+import { REWARD_TOKEN_BY_CHAIN, USERS_BY_CHAIN } from "./helpers/constants"
 import fs from "fs"
 import path from "path"
-import { Contract } from "ethers"
+import { BigNumber, Contract } from "ethers"
 import { getRpcUrl } from "../hardhat.config"
 
-describe("Fork parity using deployments + per-chain token constant", () => {
-    let chainName: string
-    let REWARD_TOKEN: string
-    let PRE_BLOCK: number
-    let POST_BLOCK: number
-    let TEST_USER: string
-
-    let oldFD: string
-    let ve: string
-
-    before(async () => {
-        chainName = getChain()
-        oldFD = await getDeploymentAddress("FeeDistributor", chainName)
-        ve = await getDeploymentAddress("VotingEscrow", chainName)
-
-        console.log("chainName", chainName)
-        console.log("oldFD", oldFD)
-        console.log("ve", ve)
-
-        REWARD_TOKEN = REWARD_TOKEN_BY_CHAIN[chainName]
-        PRE_BLOCK = PREUNLOCK_BLOCK[chainName]
-        POST_BLOCK = PRE_BLOCK + 10
-        TEST_USER = "0xD237F03bb8b3982dB0C87C22Ce84f36927a57872" // random user
-
-        if (!REWARD_TOKEN) throw new Error(`No reward token constant for chain  ${chainName}`)
+describe.only("Fork parity using deployments + per-chain token constant", async function () {
+    describe("test ethereum ", async function () {
+        const chainName = "ethereum"
+        testGivenChainNameAndUserIndex(chainName)
     })
 
-    it.only("Pre-unlock: old.callStatic == new.callStatic", async () => {
-        await forkTo(chainName)
-
-        const user = await impersonate(TEST_USER)
-        const oldFDContract = await ethers.getContractAt("FeeDistributor", oldFD)
-
-        // 1. Set the unlocked slot to false
-        const veContract = await ethers.getContractAt("VotingEscrow", ve)
-        await setUnlocked(veContract)
-
-        // 2. Get the amount of tokens that the old FeeDistributor would pay
-        const amountOldFD = await oldFDContract.connect(user).callStatic.claimToken(TEST_USER, REWARD_TOKEN)
-        console.log("amountOldFD", amountOldFD)
-        expect(amountOldFD).to.be.gt(0)
-
-        // 3. Deploy newFeeDistributor on the fork
-        const NewFD = await ethers.getContractFactory("NewFeeDistributor")
-        const newFD = await NewFD.deploy(oldFD)
-
-        // 4. Fund NewFeeDistributor from FeeDistributor’s own balance on fork (or swap to a rich holder)
-        await fundNewFD(REWARD_TOKEN, oldFD, newFD.address, amountOldFD)
-
-        // 5. Check the amount of tokens that the new FeeDistributor would pay
-        console.log("pre-unlock newFD")
-        const amountNewFD = await newFD.connect(user).callStatic.claimToken(TEST_USER, REWARD_TOKEN)
-        console.log("amountNewFD", amountNewFD)
-
-        // 6. Check the amount is the same in both FeeDistributors
-        expect(amountNewFD).to.equal(amountOldFD)
-    })
-
-    it.skip("Post-unlock: old reverts, new returns same amount as pre-unlock", async () => {
-        // First, re-run pre-unlock to capture expected amount
-        await forkTo(chainName)
-        const userPre = await impersonate(TEST_USER)
-        const oldFDContract = await ethers.getContractAt("FeeDistributor", oldFD)
-        const amountPreUnlock = await oldFDContract.connect(userPre).callStatic.claimToken(TEST_USER, REWARD_TOKEN)
-        expect(amountPreUnlock).to.be.gt(0)
-
-        // Now move to a block after unlock
-        await forkTo(chainName)
-        const user = await impersonate(TEST_USER)
-        // const fd = await ethers.getContractAt("FeeDistributor", oldFD.address)
-        // todo check the revert is the expected one
-        // ! will no revert until a week latter :(
-        await expect(oldFDContract.connect(user).callStatic.claimToken(TEST_USER, REWARD_TOKEN)).to.be.reverted // typically "unlocked globally" via VE.checkpoint()
-
-        // NewFeeDistributor still matches the pre-unlock amount
-        const NewFD = await ethers.getContractFactory("NewFeeDistributor")
-        const newFD = await NewFD.deploy(oldFD)
-        await newFD.waitForDeployment()
-
-        await fundNewFD(REWARD_TOKEN, oldFD, await newFD.getAddress(), amountPreUnlock)
-
-        const preview = await newFD.connect(user).callStatic.claimToken(TEST_USER, REWARD_TOKEN)
-        expect(preview).to.equal(amountPreUnlock)
-
-        // Optional: real stateful claim to ensure transfer succeeds
-        const token = await ethers.getContractAt("IERC20", REWARD_TOKEN)
-        const before = await token.balanceOf(TEST_USER)
-        await newFD.connect(user).claimToken(TEST_USER, REWARD_TOKEN)
-        const after = await token.balanceOf(TEST_USER)
-        expect(after - before).to.equal(amountPreUnlock)
-
-        // todo check can't claim twice
+    describe("test arbitrum", async function () {
+        const chainName = "arbitrum"
+        testGivenChainNameAndUserIndex(chainName)
     })
 })
 
+interface ContractAddresses {
+    ve: string
+    oldFD: string
+    newFD: string
+}
+
+async function testGivenChainNameAndUserIndex(chainName: string) {
+    const usersLength = USERS_BY_CHAIN[chainName].length
+
+    // Declare here; set them in `before`
+    let ve!: string
+    let oldFD!: string
+    let newFD!: string
+
+    before(async function () {
+        // 1) Get deployed contract addresses from local files
+        oldFD = getDeploymentAddress("FeeDistributor", chainName)
+        ve = getDeploymentAddress("VotingEscrow", chainName)
+
+        // 2) Fork to the chain
+        await forkTo(chainName)
+
+        // 3) Deploy newFD on the fork
+        const NewFD = await ethers.getContractFactory("NewFeeDistributor")
+        const deployed = await NewFD.deploy(oldFD)
+        await deployed.deployed() // ensure code is there
+        newFD = deployed.address
+    })
+
+    describe("test all users", function () {
+        for (let i = 0; i < usersLength; i++) {
+            // NOTE: do NOT pass an object with ve/oldFD/newFD here.
+            // Those values will be read inside the test after `before` runs.
+            specificUserBehavior(chainName, i, () => ({ ve, oldFD, newFD }))
+        }
+    })
+}
+
+function specificUserBehavior(chainName: string, userIndex: number, addrs: () => ContractAddresses) {
+    const userAddress = USERS_BY_CHAIN[chainName][userIndex]
+    const rewardToken = REWARD_TOKEN_BY_CHAIN[chainName]
+
+    it(`Pre-unlock: old.callStatic == new.callStatic for user ${userIndex}`, async function () {
+        console.log("here1", userAddress)
+        const { ve, oldFD, newFD } = addrs()
+
+        const user = await impersonate(userAddress)
+        const oldFDContract = await ethers.getContractAt("FeeDistributor", oldFD)
+
+        // 1) Set unlocked=false on ve
+        const veContract = await ethers.getContractAt("VotingEscrow", ve)
+        await setUnlocked(veContract, false)
+
+        // 2) Amount old FD would pay
+        const amountOldFD = await oldFDContract.connect(user).callStatic.claimToken(userAddress, rewardToken)
+        // expect(amountOldFD).to.be.gt(0)
+
+        // 3) Lock back the ve
+        await setUnlocked(veContract, true)
+
+        // 4) New FD on fork
+        const newFDContract = await ethers.getContractAt("NewFeeDistributor", newFD)
+
+        // 5) Move tokens from oldFD to newFD
+        await fundNewFD(rewardToken, oldFD, newFD)
+
+        // 6) Check new amount
+        const amountNewFD = await newFDContract.connect(user).callStatic.claimToken(userAddress, rewardToken)
+
+        // 7) Compare
+        expect(amountNewFD).to.equal(amountOldFD)
+        console.log("amountNewFD", amountNewFD.toString())
+        console.log("amountOldFD", amountOldFD.toString())
+    })
+
+    it("Gas estimate", async function () {
+        const { ve, oldFD, newFD } = addrs()
+
+        await forkTo(chainName)
+
+        const user = await impersonate(userAddress)
+        const oldFDContract = await ethers.getContractAt("FeeDistributor", oldFD)
+
+        // 1) unlocked=false
+        const veContract = await ethers.getContractAt("VotingEscrow", ve)
+        await setUnlocked(veContract, false)
+
+        // 2) Gas old
+        const gasOld = await oldFDContract.connect(user).estimateGas.claimToken(userAddress, rewardToken)
+
+        // 3) Lock back
+        await setUnlocked(veContract, true)
+
+        // 4) New FD + fund
+        const newFDContract = await ethers.getContractAt("NewFeeDistributor", newFD)
+        await fundNewFD(rewardToken, oldFD, newFD)
+
+        // 5) Gas new
+        const gasNew = await newFDContract.connect(user).estimateGas.claimToken(userAddress, rewardToken)
+
+        // Optional cost calc
+        const fee = await ethers.provider.getFeeData()
+        const block = await ethers.provider.getBlock("latest")
+        const base = block.baseFeePerGas || (fee.gasPrice as BigNumber)
+        const priority = fee.maxPriorityFeePerGas || ethers.utils.parseUnits("2", "gwei")
+        const effective = base.add(priority)
+
+        console.log("oldFD gas:", gasOld.toString(), "wei cost:", gasOld.mul(effective).toString())
+        console.log("newFD gas:", gasNew.toString(), "wei cost:", gasNew.mul(effective).toString())
+    })
+}
 /* -------------------- Helper functions -------------------- */
 
-async function setUnlocked(veContract: Contract) {
+async function setUnlocked(veContract: Contract, unlocked: boolean) {
     /**
      * VotingEscrow contract slot positions
      * 0 owner
@@ -114,17 +142,15 @@ async function setUnlocked(veContract: Contract) {
     const slotIdx = 3
     const slot = "0x" + slotIdx.toString(16).padStart(64, "0")
 
-    // New value: 32-byte left-padded hex (false = all zeros)
-    const value = "0x" + "00".repeat(32)
+    // New value: 32-byte left-padded hex
+    const value = "0x" + (unlocked ? "01" : "00").repeat(32)
 
     // set the unlocked slot to false
     await network.provider.send("hardhat_setStorageAt", [veContract.address, slot, value])
 
     // check the unlocked slot is false
-    expect(await ethers.provider.getStorageAt(veContract.address, slotIdx)).to.be.equal(
-        "0x0000000000000000000000000000000000000000000000000000000000000000"
-    )
-    expect(await veContract.unlocked()).to.be.false
+    expect(await ethers.provider.getStorageAt(veContract.address, slotIdx)).to.be.equal(value)
+    expect(await veContract.unlocked()).to.be.equal(unlocked)
 }
 
 async function forkTo(chain: string) {
@@ -143,25 +169,18 @@ async function impersonate(addr: string) {
     return await ethers.getSigner(addr)
 }
 
-async function fundNewFD(tokenAddr: string, fromAddr: string, to: string, minAmount: bigint) {
+async function fundNewFD(tokenAddr: string, fromAddr: string, to: string) {
     const erc20 = await ethers.getContractAt("@openzeppelin-solc-0.7/contracts/token/ERC20/IERC20.sol:IERC20", tokenAddr)
     const src = await impersonate(fromAddr)
     const bal = await erc20.balanceOf(fromAddr)
-    const amt = bal >= minAmount ? minAmount : bal
-    if (amt > 0) await erc20.connect(src).transfer(to, amt)
+    if (bal > 0) await erc20.connect(src).transfer(to, bal)
 }
 
-export function getDeploymentAddress(name: string, chain: string): string {
+function getDeploymentAddress(name: string, chain: string): string {
     // reads deployments/<chain>/<name>.json
     const p = path.join(process.cwd(), "deployments", chain, `${name}.json`)
     if (!fs.existsSync(p)) throw new Error(`Deployment file not found: ${p}`)
     const j = JSON.parse(fs.readFileSync(p, "utf8"))
     if (!j.address) throw new Error(`No 'address' in ${p}`)
     return j.address as string
-}
-
-export function getChain(): string {
-    // todo
-    const c = process.env.FORK_CHAIN || "arbitrum"
-    return c
 }
