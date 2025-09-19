@@ -9,6 +9,7 @@ import "dotenv/config"
 import type { NetworksUserConfig } from "hardhat/types"
 import { join } from "path"
 import "./task/get-users-accounts"
+import "hardhat-tracer"
 
 function accounts() {
     return { mnemonic: process.env.MNEMONIC }
@@ -73,7 +74,7 @@ const updateNetworkRpcUrls = (networks: NetworksUserConfig): NetworksUserConfig 
     )
 }
 
-const getRpcUrl = (chainName: string): string | null => {
+export const getRpcUrl = (chainName: string): string | null => {
     let templateUrl = process.env.RPC_URL_MAINNET
     if (!templateUrl) return null
     const url = templateUrl.replace("CHAIN", chainName)
@@ -114,6 +115,8 @@ const config: HardhatUserConfig = {
         ...updateNetworkRpcUrls(networks),
     },
     external: externalConfig,
+
+    mocha: { timeout: 180000 }, // 3 minutes
 }
 
 export default config

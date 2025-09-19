@@ -1,10 +1,10 @@
 import { expect } from "chai"
-import hre, { ethers, deployments } from "hardhat"
+import { ethers, network } from "hardhat"
 import { REWARD_TOKEN_BY_CHAIN, PREUNLOCK_BLOCK } from "./helpers/constants"
 import fs from "fs"
 import path from "path"
-
-const WEEK = 7 * 24 * 60 * 60
+import { Contract } from "ethers"
+import { getRpcUrl } from "../hardhat.config"
 
 describe("Fork parity using deployments + per-chain token constant", () => {
     let chainName: string
@@ -28,46 +28,52 @@ describe("Fork parity using deployments + per-chain token constant", () => {
         REWARD_TOKEN = REWARD_TOKEN_BY_CHAIN[chainName]
         PRE_BLOCK = PREUNLOCK_BLOCK[chainName]
         POST_BLOCK = PRE_BLOCK + 10
-        TEST_USER = "0xD237F03bb8b3982dB0C87C22Ce84f36927a57872"
+        TEST_USER = "0xD237F03bb8b3982dB0C87C22Ce84f36927a57872" // random user
 
         if (!REWARD_TOKEN) throw new Error(`No reward token constant for chain  ${chainName}`)
     })
 
     it.only("Pre-unlock: old.callStatic == new.callStatic", async () => {
-        await resetTo(PRE_BLOCK)
+        await forkTo(chainName)
 
         const user = await impersonate(TEST_USER)
         const oldFDContract = await ethers.getContractAt("FeeDistributor", oldFD)
 
-        // Ground truth from the old contract at pre-unlock block
-        const amountPreUnlock = await oldFDContract.connect(user).callStatic.claimToken(TEST_USER, REWARD_TOKEN)
-        console.log("amountPreUnlock", amountPreUnlock)
-        expect(amountPreUnlock).to.be.gt(0)
+        // 1. Set the unlocked slot to false
+        const veContract = await ethers.getContractAt("VotingEscrow", ve)
+        await setUnlocked(veContract)
 
-        // Deploy newFeeDistributor on the fork (only)
+        // 2. Get the amount of tokens that the old FeeDistributor would pay
+        const amountOldFD = await oldFDContract.connect(user).callStatic.claimToken(TEST_USER, REWARD_TOKEN)
+        console.log("amountOldFD", amountOldFD)
+        expect(amountOldFD).to.be.gt(0)
+
+        // 3. Deploy newFeeDistributor on the fork
         const NewFD = await ethers.getContractFactory("NewFeeDistributor")
         const newFD = await NewFD.deploy(oldFD)
-        // await newFD.waitForDeployment()
 
-        // Fund NewFeeDistributor from FeeDistributor’s own balance on fork (or swap to a rich holder)
-        await fundNewFD(REWARD_TOKEN, oldFD, newFD.address, amountPreUnlock)
+        // 4. Fund NewFeeDistributor from FeeDistributor’s own balance on fork (or swap to a rich holder)
+        await fundNewFD(REWARD_TOKEN, oldFD, newFD.address, amountOldFD)
 
+        // 5. Check the amount of tokens that the new FeeDistributor would pay
         console.log("pre-unlock newFD")
-        const amountPostUnlock = await newFD.connect(user).callStatic.claimToken(TEST_USER, REWARD_TOKEN)
-        console.log("amountPostUnlock", amountPostUnlock)
-        expect(amountPostUnlock).to.equal(amountPreUnlock)
+        const amountNewFD = await newFD.connect(user).callStatic.claimToken(TEST_USER, REWARD_TOKEN)
+        console.log("amountNewFD", amountNewFD)
+
+        // 6. Check the amount is the same in both FeeDistributors
+        expect(amountNewFD).to.equal(amountOldFD)
     })
 
     it.skip("Post-unlock: old reverts, new returns same amount as pre-unlock", async () => {
         // First, re-run pre-unlock to capture expected amount
-        await resetTo(PRE_BLOCK)
+        await forkTo(chainName)
         const userPre = await impersonate(TEST_USER)
         const oldFDContract = await ethers.getContractAt("FeeDistributor", oldFD)
         const amountPreUnlock = await oldFDContract.connect(userPre).callStatic.claimToken(TEST_USER, REWARD_TOKEN)
         expect(amountPreUnlock).to.be.gt(0)
 
         // Now move to a block after unlock
-        await resetTo(POST_BLOCK)
+        await forkTo(chainName)
         const user = await impersonate(TEST_USER)
         // const fd = await ethers.getContractAt("FeeDistributor", oldFD.address)
         // todo check the revert is the expected one
@@ -97,11 +103,36 @@ describe("Fork parity using deployments + per-chain token constant", () => {
 
 /* -------------------- Helper functions -------------------- */
 
-async function resetTo(blockNumber: number) {
+async function setUnlocked(veContract: Contract) {
+    /**
+     * VotingEscrow contract slot positions
+     * 0 owner
+     * 1 reentered status
+     * 2 supply
+     * 3 unlocked
+     */
+    const slotIdx = 3
+    const slot = "0x" + slotIdx.toString(16).padStart(64, "0")
+
+    // New value: 32-byte left-padded hex (false = all zeros)
+    const value = "0x" + "00".repeat(32)
+
+    // set the unlocked slot to false
+    await network.provider.send("hardhat_setStorageAt", [veContract.address, slot, value])
+
+    // check the unlocked slot is false
+    expect(await ethers.provider.getStorageAt(veContract.address, slotIdx)).to.be.equal(
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+    )
+    expect(await veContract.unlocked()).to.be.false
+}
+
+async function forkTo(chain: string) {
+    const rpcUrl = getRpcUrl(chain)
+
     await ethers.provider.send("hardhat_reset", [
         {
-            // todo
-            forking: { jsonRpcUrl: process.env.RPC_URL_ARBITRUM!, blockNumber },
+            forking: { jsonRpcUrl: rpcUrl! },
         },
     ])
 }
@@ -117,14 +148,7 @@ async function fundNewFD(tokenAddr: string, fromAddr: string, to: string, minAmo
     const src = await impersonate(fromAddr)
     const bal = await erc20.balanceOf(fromAddr)
     const amt = bal >= minAmount ? minAmount : bal
-    if (amt > 0n) await erc20.connect(src).transfer(to, amt)
-}
-
-function getForkedChainIdForConstants(): number {
-    // If we're on hardhat *and* forking mainnet, treat it as chainId 1 for constants.
-    const isHardhat = hre.network.name === "hardhat"
-    const isForking = Boolean(hre.config.networks.hardhat?.forking?.url)
-    return isHardhat && isForking ? 1 : hre.network.config.chainId ?? 1
+    if (amt > 0) await erc20.connect(src).transfer(to, amt)
 }
 
 export function getDeploymentAddress(name: string, chain: string): string {
