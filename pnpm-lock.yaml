@@ -75,6 +75,9 @@ importers:
       hardhat-gas-reporter:
         specifier: ^1.0.6
         version: 1.0.10(bufferutil@4.0.9)(hardhat@2.26.3(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@14.18.63)(typescript@4.9.5))(typescript@4.9.5)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10)
+      hardhat-tracer:
+        specifier: 3.3.0
+        version: 3.3.0(bufferutil@4.0.9)(chai@4.5.0)(hardhat@2.26.3(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@14.18.63)(typescript@4.9.5))(typescript@4.9.5)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10)
       p-limit:
         specifier: 7.1.1
         version: 7.1.1
@@ -2410,6 +2413,12 @@ packages:
     resolution: {integrity: sha512-02N4+So/fZrzJ88ci54GqwVA3Zrf0C9duuTyGt0CFRIh/CdNwbnTgkXkRfojOMLBQ+6t+lBIkgbsOtqMvNwikA==}
     peerDependencies:
       hardhat: ^2.0.2
+
+  hardhat-tracer@3.3.0:
+    resolution: {integrity: sha512-brgKdgnBV7/g4RDyzEley71OLNFK5iGoj9sQg5ilmEmXStlbEsWYRxQPBSSIlZrtS3nte/AbMuSZ9pTTi7txJA==}
+    peerDependencies:
+      chai: 4.x
+      hardhat: '>=2.22.5 <3.x'
 
   hardhat@2.26.3:
     resolution: {integrity: sha512-gBfjbxCCEaRgMCRgTpjo1CEoJwqNPhyGMMVHYZJxoQ3LLftp2erSVf8ZF6hTQC0r2wst4NcqNmLWqMnHg1quTw==}
@@ -8439,6 +8448,19 @@ snapshots:
       - '@codechecks/client'
       - bufferutil
       - debug
+      - utf-8-validate
+
+  hardhat-tracer@3.3.0(bufferutil@4.0.9)(chai@4.5.0)(hardhat@2.26.3(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@14.18.63)(typescript@4.9.5))(typescript@4.9.5)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10):
+    dependencies:
+      chai: 4.5.0
+      chalk: 4.1.2
+      debug: 4.4.3(supports-color@8.1.1)
+      ethers: 5.8.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
+      hardhat: 2.26.3(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@14.18.63)(typescript@4.9.5))(typescript@4.9.5)(utf-8-validate@5.0.10)
+      semver: 7.7.2
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
       - utf-8-validate
 
   hardhat@2.26.3(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@14.18.63)(typescript@4.9.5))(typescript@4.9.5)(utf-8-validate@5.0.10):
