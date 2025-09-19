@@ -9,6 +9,7 @@ import {SafeERC20} from "@openzeppelin-solc-0.7/contracts/token/ERC20/SafeERC20.
 import {ReentrancyGuard} from "@openzeppelin-solc-0.7/contracts/utils/ReentrancyGuard.sol";
 
 import {IFeeDistributor} from "./interfaces/IFeeDistributor.sol";
+import {IVotingEscrow} from "./interfaces/IVotingEscrow.sol";
 
 /**
  * Todo
@@ -28,7 +29,8 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
     uint256 private constant WEEK = 1 weeks;
     uint256 private constant WEEK_MINUS_SECOND = 1 weeks - 1;
 
-    IFeeDistributor private immutable _old;
+    IFeeDistributor private immutable _oldFD;
+    IVotingEscrow private immutable _ve;
 
     // We maintain our own per-(user,token) cursor, just like the old contract does,
     // so we don’t double pay across multiple calls.
@@ -42,7 +44,7 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
     /* -------------------- Modifiers (match old semantics) -------------------- */
     modifier userAllowedToClaim(address user) {
         // If old contract enforces "only ve holder can claim", mirror the behavior
-        if (_old.onlyVeHolderClaimingEnabled(user)) {
+        if (_oldFD.onlyVeHolderClaimingEnabled(user)) {
             require(msg.sender == user, "Claiming is not allowed");
         }
         _;
@@ -62,7 +64,8 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
     }
 
     constructor(IFeeDistributor oldFeeDistributor) {
-        _old = oldFeeDistributor;
+        _oldFD = oldFeeDistributor;
+        _ve = oldFeeDistributor.getVotingEscrow();
     }
 
     /* -------------------- External admin helpers -------------------- */
@@ -78,13 +81,13 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
         uint256 c = _userTokenTimeCursor[user][token];
         if (c == 0) {
             // First time: mirror the old contract's default start via its getter
-            return _old.getUserTokenTimeCursor(user, token);
+            return _oldFD.getUserTokenTimeCursor(user, token);
         }
         return c;
     }
 
     function getOldFeeDistributor() external view returns (IFeeDistributor) {
-        return _old;
+        return _oldFD;
     }
 
     /* -------------------- Claiming (same function names & shape) -------------------- */
@@ -121,12 +124,12 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
         // Establish starting week: our local cursor or (first time) old.getUserTokenTimeCursor
         uint256 nextUserTokenWeekToClaim = _userTokenTimeCursor[user][token];
         if (nextUserTokenWeekToClaim == 0) {
-            nextUserTokenWeekToClaim = _old.getUserTokenTimeCursor(user, token);
+            nextUserTokenWeekToClaim = _oldFD.getUserTokenTimeCursor(user, token);
         }
 
         // Compute firstUnclaimableWeek exactly like the old contract:
         // min( roundUp(min(globalCursor, userCursor)), roundDown(tokenCursor) )
-        uint256 firstUnclaimableWeek = _min(_roundUpTimestamp(_min(_old.getTimeCursor(), _old.getUserTimeCursor(user))), _roundDownTimestamp(_old.getTokenTimeCursor(token)));
+        uint256 firstUnclaimableWeek = _min(_roundUpTimestamp(_min(_oldFD.getTimeCursor(), _oldFD.getUserTimeCursor(user))), _roundDownTimestamp(_oldFD.getTokenTimeCursor(token)));
 
         uint256 amount;
         // Same structure: iterate weeks up to a gas-friendly cap (20), break when we reach the bound
@@ -134,7 +137,7 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
             // We clearly cannot claim for `firstUnclaimableWeek` and so we break here.
             if (nextUserTokenWeekToClaim >= firstUnclaimableWeek) break;
 
-            amount += (_old.getTokensDistributedInWeek(token, nextUserTokenWeekToClaim) * _old.getUserBalanceAtTimestamp(user, nextUserTokenWeekToClaim)) / _old.getTotalSupplyAtTimestamp(nextUserTokenWeekToClaim);
+            amount += (_oldFD.getTokensDistributedInWeek(token, nextUserTokenWeekToClaim) * _oldFD.getUserBalanceAtTimestamp(user, nextUserTokenWeekToClaim)) / _oldFD.getTotalSupplyAtTimestamp(nextUserTokenWeekToClaim);
 
             nextUserTokenWeekToClaim += 1 weeks;
         }
@@ -167,6 +170,6 @@ contract NewFeeDistributor is Ownable, ReentrancyGuard {
     }
 
     function _checkIfClaimingEnabled(IERC20 token) private view {
-        require(_old.canTokenBeClaimed(token), "Token is not allowed");
+        require(_oldFD.canTokenBeClaimed(token), "Token is not allowed");
     }
 }
