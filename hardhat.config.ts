@@ -75,6 +75,10 @@ const config: HardhatUserConfig = {
             chainId: 250,
             accounts: accounts(),
         },
+        anvil: {
+            url: "http://127.0.0.1:8545",
+            timeout: 300_000, // 5 minutes
+        },
     },
 }
 
