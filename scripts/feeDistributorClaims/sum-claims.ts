@@ -8,31 +8,25 @@ const readFile = promisify(fs.readFile)
 const writeFile = promisify(fs.writeFile)
 const stat = promisify(fs.stat)
 
+const chainName = "avalanche"
+
 interface ClaimRecord {
     address: string
-    token: string
-    claimedAmount: string
-    status: string
-    txHash: string
-    jobId: number
-    ts: number
+    rawAmount: string
+    formattedAmount: string
 }
 
 interface ClaimsSummary {
     totalAmount: bigint
     totalClaims: number
-    successfulClaims: number
-    failedClaims: number
     uniqueAddresses: number
-    uniqueTokens: number
-    statusBreakdown: Record<string, number>
 }
 
 class ClaimsSummarizer {
     private dataDir: string
     private chain: string
 
-    constructor(dataDir: string, chain: string = "avalanche") {
+    constructor(dataDir: string, chain: string = chainName) {
         this.dataDir = dataDir
         this.chain = chain
     }
@@ -42,7 +36,7 @@ class ClaimsSummarizer {
             console.log("=== Claims Amount Summarizer ===")
             console.log(`Chain: ${this.chain}`)
             console.log(`Data directory: ${this.dataDir}`)
-            console.log(`Looking for claims in: ${this.chain}/data/claims.ndjson`)
+            console.log(`Looking for claims in: ${this.chain}/data/sorted-claims-by-amount.csv`)
 
             // Find the claims file
             const claimsFile = await this.findClaimsFile()
@@ -69,7 +63,7 @@ class ClaimsSummarizer {
         const chainPath = path.join(this.dataDir, this.chain)
 
         // Look specifically in the data subdirectory
-        const claimsPath = path.join(chainPath, "data", "claims.ndjson")
+        const claimsPath = path.join(chainPath, "data", "sorted-claims-by-amount.csv")
 
         try {
             await stat(claimsPath)
@@ -87,47 +81,43 @@ class ClaimsSummarizer {
         const summary: ClaimsSummary = {
             totalAmount: BigInt(0),
             totalClaims: 0,
-            successfulClaims: 0,
-            failedClaims: 0,
             uniqueAddresses: 0,
-            uniqueTokens: 0,
-            statusBreakdown: {},
         }
 
         const addressSet = new Set<string>()
-        const tokenSet = new Set<string>()
 
-        for (let i = 0; i < lines.length; i++) {
+        // Skip header line
+        for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim()
             if (!line) continue
 
             try {
-                const claim: ClaimRecord = JSON.parse(line)
+                // Parse CSV: Address,Raw Amount,Formatted Amount (6 decimals)
+                const columns = line.split(",")
+                if (columns.length < 2) {
+                    console.warn(`Warning: Invalid CSV format on line ${i + 1}: ${line}`)
+                    continue
+                }
+
+                const claim: ClaimRecord = {
+                    address: columns[0].trim(),
+                    rawAmount: columns[1].trim(),
+                    formattedAmount: columns[2]?.trim() || "",
+                }
 
                 // Track basic stats
                 summary.totalClaims++
 
-                // Track unique addresses and tokens
+                // Track unique addresses
                 if (claim.address) addressSet.add(claim.address)
-                if (claim.token) tokenSet.add(claim.token)
 
-                // Track status
-                const status = claim.status || "unknown"
-                summary.statusBreakdown[status] = (summary.statusBreakdown[status] || 0) + 1
-
-                if (status === "ok") {
-                    summary.successfulClaims++
-                } else {
-                    summary.failedClaims++
-                }
-
-                // Sum amounts (only for successful claims)
-                if (claim.claimedAmount && status === "ok") {
+                // Sum amounts from the raw amount column
+                if (claim.rawAmount) {
                     try {
-                        const amount = BigInt(claim.claimedAmount)
+                        const amount = BigInt(claim.rawAmount)
                         summary.totalAmount += amount
                     } catch (amountError) {
-                        console.warn(`Warning: Invalid amount on line ${i + 1}: ${claim.claimedAmount}`)
+                        console.warn(`Warning: Invalid amount on line ${i + 1}: ${claim.rawAmount}`)
                     }
                 }
             } catch (parseError) {
@@ -136,7 +126,6 @@ class ClaimsSummarizer {
         }
 
         summary.uniqueAddresses = addressSet.size
-        summary.uniqueTokens = tokenSet.size
 
         return summary
     }
@@ -147,17 +136,7 @@ class ClaimsSummarizer {
         console.log("=".repeat(50))
 
         console.log(`Total Claims Processed: ${summary.totalClaims.toLocaleString()}`)
-        console.log(`Successful Claims: ${summary.successfulClaims.toLocaleString()}`)
-        console.log(`Failed Claims: ${summary.failedClaims.toLocaleString()}`)
         console.log(`Unique Addresses: ${summary.uniqueAddresses.toLocaleString()}`)
-        console.log(`Unique Tokens: ${summary.uniqueTokens.toLocaleString()}`)
-
-        console.log("\nSTATUS BREAKDOWN:")
-        Object.entries(summary.statusBreakdown)
-            .sort(([, a], [, b]) => b - a)
-            .forEach(([status, count]) => {
-                console.log(`  ${status}: ${count.toLocaleString()}`)
-            })
 
         console.log("\nAMOUNT SUMMARY:")
         console.log(`Total Claimed Amount (raw): ${summary.totalAmount.toString()}`)
@@ -182,11 +161,7 @@ class ClaimsSummarizer {
             claimsFile: path.relative(this.dataDir, claimsFile),
             summary: {
                 totalClaims: summary.totalClaims,
-                successfulClaims: summary.successfulClaims,
-                failedClaims: summary.failedClaims,
                 uniqueAddresses: summary.uniqueAddresses,
-                uniqueTokens: summary.uniqueTokens,
-                statusBreakdown: summary.statusBreakdown,
                 amounts: {
                     totalAmountRaw: summary.totalAmount.toString(),
                     formatted: {
@@ -221,7 +196,7 @@ async function main() {
     const args = process.argv.slice(2)
 
     const dataDir = args[0] || path.join(__dirname, "data")
-    const chain = args[1] || "avalanche"
+    const chain = args[1] || chainName
 
     const summarizer = new ClaimsSummarizer(dataDir, chain)
 
