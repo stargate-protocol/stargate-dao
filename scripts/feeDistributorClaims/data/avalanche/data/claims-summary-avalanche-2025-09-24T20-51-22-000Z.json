@@ -1,0 +1,22 @@
+{
+  "chain": "avalanche",
+  "timestamp": "2025-09-24T20:51:22.000Z",
+  "claimsFile": "avalanche/data/claims.ndjson",
+  "summary": {
+    "totalClaims": 18011,
+    "successfulClaims": 18011,
+    "failedClaims": 0,
+    "uniqueAddresses": 17979,
+    "uniqueTokens": 1,
+    "statusBreakdown": {
+      "ok": 18011
+    },
+    "amounts": {
+      "totalAmountRaw": "46387342723",
+      "formatted": {
+        "decimals6": "46,387.342723",
+        "noDecimals": "46,387,342,723"
+      }
+    }
+  }
+}
