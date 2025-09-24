@@ -1,16 +1,19 @@
 export const REWARD_TOKEN_BY_CHAIN: Record<string, string> = {
     arbitrum: "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
     ethereum: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    avalanche: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
 }
 
 export const FD_BY_CHAIN: Record<string, string> = {
     arbitrum: "0xAF667811A7eDcD5B0066CD4cA0da51637DB76D09",
     ethereum: "0xAF667811A7eDcD5B0066CD4cA0da51637DB76D09",
+    avalanche: "0xAF667811A7eDcD5B0066CD4cA0da51637DB76D09",
 }
 
 export const VE_BY_CHAIN: Record<string, string> = {
     arbitrum: "0xfBd849E6007f9BC3CC2D6Eb159c045B8dc660268",
     ethereum: "0x0e42acBD23FAee03249DAFF896b78d7e79fBD58E",
+    avalanche: "0xCa0F57D295bbcE554DA2c07b005b7d6565a58fCE",
 }
 
 export const INPUT_CSV_PATH = (chain: string) => `./scripts/feeDistributorClaims/data/${chain}/in/addresses.csv`
