@@ -1,32 +1,38 @@
+// jobs/runJob-callstatic.ts
 import { ethers } from "hardhat"
 import fs from "fs"
-import { NonceManager } from "@ethersproject/experimental"
-import { BATCH_SIZE, EXEC_IFACE, addressFromCsvLine, loadProcessed, parseBatchReceipt, feeOverrides, startHeartbeat } from "./utils"
+import { BATCH_SIZE, addressFromCsvLine, loadProcessed, startHeartbeat } from "./utils"
+
+// If this import is the full Hardhat artifact JSON, use `.abi` below.
+// If you already export plain ABI, drop the `.abi`.
+import readerArtifact from "../../artifacts/contracts/ClaimReader.sol/ClaimReader.json"
 
 export type JobConfig = {
     jobId: number
-    signer: any // ethers.Signer
-    executorAddress: string
+    signer: any // ethers.Signer (kept for compatibility; unused for callStatic)
+    readerAddress: string
     token: string
     shardCsvPath: string
     outPath: string
     errPath: string
+    skipPath: string
 }
 
 export async function runJob(cfg: JobConfig) {
-    const { jobId, signer, executorAddress, token, shardCsvPath, outPath, errPath } = cfg
+    const { jobId, readerAddress, token, shardCsvPath, outPath, errPath, skipPath } = cfg
 
-    const managed = new NonceManager(signer)
-    const senderAddr = await signer.getAddress()
-    await managed.setTransactionCount(await ethers.provider.getTransactionCount(senderAddr, "latest"))
-
-    const ExecutorForJob = new ethers.Contract(executorAddress, EXEC_IFACE.fragments, managed)
+    // Instantiate reader with a provider only (no signer needed for callStatic)
+    const abi = (readerArtifact as any).abi ?? (readerArtifact as any)
+    const reader = new ethers.Contract(readerAddress, abi, ethers.provider)
 
     const processed = await loadProcessed(outPath)
-    if (processed.size > 0) console.log(`[Job ${jobId}] Resuming — already have ${processed.size} results logged.`)
+    if (processed.size > 0) {
+        console.log(`[Job ${jobId}] Resuming — already have ${processed.size} results logged.`)
+    }
 
     const out = fs.createWriteStream(outPath, { flags: "a" })
     const err = fs.createWriteStream(errPath, { flags: "a" })
+    const skip = fs.createWriteStream(skipPath, { flags: "a" })
 
     let seen = 0
     let ok = 0
@@ -35,29 +41,31 @@ export async function runJob(cfg: JobConfig) {
     const startedAt = Date.now()
     const batch: string[] = []
 
+    // Fix a snapshot block so all batches are evaluated at the same chain state.
+    const snapshotBlock = await ethers.provider.getBlockNumber()
+    const callOpts = { gasLimit: 30_000_000_000_000, blockTag: snapshotBlock as any } // generous gas for eth_call
+
     const stopBeat = startHeartbeat(
         `[Job ${jobId}] running…`,
         () => `seen=${seen} ok=${ok} fail=${failed} skip=${skipped} pendingBatch=${batch.length}`
     )
 
-    async function sendBatchWithRetry(users: string[]) {
+    async function callBatchWithRetry(users: string[]) {
         const maxTries = 5
         let attempt = 0
         let lastErr: any
+
         while (attempt < maxTries) {
             try {
-                const overrides = await feeOverrides(attempt)
-                console.log(`[Job ${jobId}] → sending batch size=${users.length} (attempt ${attempt + 1})`)
-                const tx = await ExecutorForJob.functions.batchFullClaimToken(users, token, overrides)
-                const rc = await tx.wait()
-                console.log(`[Job ${jobId}]    mined: ${rc.transactionHash}`)
-                return rc
+                console.log(`[Job ${jobId}] → callStatic batch size=${users.length} (attempt ${attempt + 1}) @block ${snapshotBlock}`)
+                console.log("=======>", users.length)
+                const [amounts, requiresSelf] = await reader.callStatic.viewFullClaimPerUser(users, token, callOpts)
+                return { amounts, requiresSelf }
             } catch (e: any) {
-                const msg = e?.error?.message || e?.message || ""
+                const msg = e?.error?.message || e?.message || String(e)
                 console.log(`[Job ${jobId}]    attempt failed: ${msg}`)
-                if (/(nonce too low|underpriced|already known|replacement|fee cap|conflict)/i.test(msg)) {
-                    const fresh = await ethers.provider.getTransactionCount(senderAddr, "latest")
-                    await managed.setTransactionCount(fresh)
+                // Retry on transient node issues; otherwise rethrow
+                if (/(timeout|temporar|429|503|ETIMEDOUT|ECONNRESET|gateway|header not found)/i.test(msg)) {
                     attempt++
                     lastErr = msg
                     continue
@@ -65,10 +73,10 @@ export async function runJob(cfg: JobConfig) {
                 throw e
             }
         }
-        throw new Error(`[Job ${jobId}] sendBatchWithRetry failed after ${maxTries} attempts. lastErr=${lastErr}`)
+        throw new Error(`[Job ${jobId}] callBatchWithRetry failed after ${maxTries} attempts. lastErr=${lastErr}`)
     }
 
-    // stream the shard file
+    // Stream the shard file
     const rl = require("readline").createInterface({
         input: fs.createReadStream(shardCsvPath),
         crlfDelay: Infinity,
@@ -77,8 +85,10 @@ export async function runJob(cfg: JobConfig) {
     for await (const line of rl) {
         const addr = addressFromCsvLine(line)
         if (!addr) continue
+
         const user = ethers.utils.getAddress(addr)
         seen++
+
         if (processed.has(user.toLowerCase())) {
             if (seen % 250 === 0) console.log(`[Job ${jobId}] (skip processed) ${user}`)
             continue
@@ -87,81 +97,140 @@ export async function runJob(cfg: JobConfig) {
         batch.push(user)
 
         if (batch.length >= BATCH_SIZE) {
-            const rc = await sendBatchWithRetry(batch)
-            const perUser = parseBatchReceipt(rc, executorAddress)
+            try {
+                const { amounts, requiresSelf } = await callBatchWithRetry(batch)
 
-            for (const u of batch) {
-                const key = u.toLowerCase()
-                const res = perUser[key]
-                if (!res) {
-                    failed++
-                    err.write(
-                        JSON.stringify({ address: u, token, status: "failed", error: "no-event-in-receipt", jobId, ts: Date.now() }) + "\n"
-                    )
-                    continue
+                for (let i = 0; i < batch.length; i++) {
+                    const u = batch[i]
+                    const key = u.toLowerCase()
+                    const amount = amounts[i] // BigNumber
+                    const onlySelf = !!requiresSelf[i]
+
+                    if (onlySelf) {
+                        skipped++
+                        skip.write(
+                            JSON.stringify({
+                                address: u,
+                                token,
+                                status: "skipped_only_self",
+                                jobId,
+                                ts: Date.now(),
+                            }) + "\n"
+                        )
+                    } else if (amount.isZero()) {
+                        skipped++
+                        skip.write(
+                            JSON.stringify({
+                                address: u,
+                                token,
+                                status: "skipped_no_balance",
+                                jobId,
+                                ts: Date.now(),
+                            }) + "\n"
+                        )
+                    } else {
+                        ok++
+                        out.write(
+                            JSON.stringify({
+                                address: u,
+                                token,
+                                claimedAmount: amount.toString(), // exact value from contract
+                                status: "ok",
+                                txHash: "callStatic", // placeholder for schema compatibility
+                                jobId,
+                                ts: Date.now(),
+                            }) + "\n"
+                        )
+                    }
+
+                    // Mark as processed so we don't re-queue on resume
+                    processed.add(key)
                 }
-                if (res.status === "ok") {
+            } catch (e: any) {
+                failed += batch.length
+                const msg = e?.error?.message || e?.message || String(e)
+                for (const u of batch) {
+                    err.write(
+                        JSON.stringify({
+                            address: u,
+                            token,
+                            status: "failed",
+                            error: msg,
+                            jobId,
+                            ts: Date.now(),
+                        }) + "\n"
+                    )
+                }
+            } finally {
+                batch.length = 0
+            }
+        }
+    }
+
+    // Flush any remainder
+    if (batch.length > 0) {
+        try {
+            const { amounts, requiresSelf } = await callBatchWithRetry(batch)
+
+            for (let i = 0; i < batch.length; i++) {
+                const u = batch[i]
+                const key = u.toLowerCase()
+                const amount = amounts[i]
+                const onlySelf = !!requiresSelf[i]
+
+                if (onlySelf) {
+                    skipped++
+                    skip.write(
+                        JSON.stringify({
+                            address: u,
+                            token,
+                            status: "skipped_only_self",
+                            jobId,
+                            ts: Date.now(),
+                        }) + "\n"
+                    )
+                } else if (amount.isZero()) {
+                    skipped++
+                    skip.write(
+                        JSON.stringify({
+                            address: u,
+                            token,
+                            status: "skipped_no_balance",
+                            jobId,
+                            ts: Date.now(),
+                        }) + "\n"
+                    )
+                } else {
                     ok++
                     out.write(
                         JSON.stringify({
                             address: u,
                             token,
-                            claimedAmount: res.amount,
-                            rounds: res.rounds ?? "0",
+                            claimedAmount: amount.toString(),
                             status: "ok",
-                            txHash: rc.transactionHash,
+                            txHash: "callStatic",
                             jobId,
                             ts: Date.now(),
                         }) + "\n"
                     )
-                } else if (res.status === "skipped") {
-                    skipped++
-                    const skipStatus = res.reason === "no_balance" ? "skipped_no_balance" : "skipped_only_self"
-                    err.write(JSON.stringify({ address: u, token, status: skipStatus, jobId, ts: Date.now() }) + "\n")
-                } else {
-                    failed++
-                    err.write(
-                        JSON.stringify({ address: u, token, status: "failed", error: res.reason || "revert", jobId, ts: Date.now() }) + "\n"
-                    )
                 }
-            }
-            batch.length = 0
-        }
-    }
 
-    // flush any remainder
-    if (batch.length > 0) {
-        const rc = await sendBatchWithRetry(batch)
-        const perUser = parseBatchReceipt(rc, executorAddress)
-        for (const u of batch) {
-            const key = u.toLowerCase()
-            const res = perUser[key]
-            if (!res) {
-                failed++
-                err.write(JSON.stringify({ address: u, token, status: "failed", error: "no-event-in-receipt", jobId, ts: Date.now() }) + "\n")
-                continue
+                processed.add(key)
             }
-            if (res.status === "ok") {
-                ok++
-                out.write(
+        } catch (e: any) {
+            failed += batch.length
+            const msg = e?.error?.message || e?.message || String(e)
+            for (const u of batch) {
+                err.write(
                     JSON.stringify({
                         address: u,
                         token,
-                        claimedAmount: res.amount,
-                        rounds: res.rounds ?? "0",
-                        status: "ok",
-                        txHash: rc.transactionHash,
+                        status: "failed",
+                        error: msg,
                         jobId,
                         ts: Date.now(),
                     }) + "\n"
                 )
-            } else if (res.status === "skipped") {
-                skipped++
-                const skipStatus = res.reason === "no_balance" ? "skipped_no_balance" : "skipped_only_self"
-                err.write(JSON.stringify({ address: u, token, status: skipStatus, jobId, ts: Date.now() }) + "\n")
-            } else {
-                failed++
-                err.write(JSON.stringify({ address: u, token, status: "failed", error: res.reason || "revert", jobId, ts: Date.now() }) + "\n")
             }
         }
     }
@@ -174,4 +243,5 @@ export async function runJob(cfg: JobConfig) {
     console.log(`[Job ${jobId}] done. ok=${ok} fail=${failed} skip=${skipped} seen=${seen} elapsed=${elapsed}s`)
     console.log(`[Job ${jobId}] wrote: ${outPath}`)
     console.log(`[Job ${jobId}] errors: ${errPath}`)
+    console.log(`[Job ${jobId}] skips: ${skipPath}`)
 }

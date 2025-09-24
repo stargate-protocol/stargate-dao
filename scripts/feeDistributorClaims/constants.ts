@@ -17,5 +17,7 @@ export const INPUT_CSV_PATH = (chain: string) => `./scripts/feeDistributorClaims
 
 export const OUTPUT_NDJSON = (chain: string) => `./scripts/feeDistributorClaims/data/${chain}/out/claims.ndjson`
 export const ERRORS_NDJSON = (chain: string) => `./scripts/feeDistributorClaims/data/${chain}/out/errors.ndjson`
+export const SKIPS_NDJSON = (chain: string) => `./scripts/feeDistributorClaims/data/${chain}/out/skips.ndjson`
 
 export const EXECUTOR_STORE = (chain: string) => `./scripts/feeDistributorClaims/data/${chain}/executor.json`
+export const READER_STORE = (chain: string) => `./scripts/feeDistributorClaims/data/${chain}/reader.json`

@@ -3,19 +3,9 @@ import fs from "fs"
 import path from "path"
 import readline from "readline"
 
-export const BATCH_SIZE = 10
+export const BATCH_SIZE = 100
 export const GAS_LIMIT = 50_000_000
 export const HEARTBEAT_MS = 30_000
-
-// ABIs shared by runners
-export const EXEC_IFACE = new ethers.utils.Interface([
-    "event Claimed(address indexed user, address indexed token, uint256 amount)",
-    "event ClaimedWithRounds(address indexed user, address indexed token, uint256 amount, uint256 rounds)",
-    "event ClaimFailed(address indexed user, address indexed token, bytes reason)",
-    "event ClaimSkippedOnlySelf(address indexed user, address indexed token)",
-    "event ClaimSkippedNoBalance(address indexed user, address indexed token)",
-    "function batchFullClaimToken(address[] users, address token) returns (uint256 totalClaimed)",
-])
 
 export const VE_IFACE = new ethers.utils.Interface(["function unlocked() view returns (bool)"])
 
@@ -70,49 +60,6 @@ export type PerUserResult =
     | { status: "ok"; amount: string; rounds?: string }
     | { status: "failed"; reason?: string }
     | { status: "skipped"; reason?: string }
-
-export function parseBatchReceipt(rc: any, executorAddr: string): Record<string, PerUserResult> {
-    const out: Record<string, PerUserResult> = {}
-    const execLower = executorAddr.toLowerCase()
-    for (const log of rc.logs) {
-        if (log.address.toLowerCase() !== execLower) continue
-        let parsed: any
-        try {
-            parsed = EXEC_IFACE.parseLog(log)
-        } catch {
-            continue
-        }
-        const user = ethers.utils.getAddress(parsed.args.user)
-        const key = user.toLowerCase()
-        switch (parsed.name) {
-            case "ClaimedWithRounds": {
-                const amount = (parsed.args.amount as ethers.BigNumber).toString()
-                const rounds = (parsed.args.rounds as ethers.BigNumber).toString()
-                out[key] = { status: "ok", amount, rounds }
-                break
-            }
-            case "Claimed": {
-                const amount = (parsed.args.amount as ethers.BigNumber).toString()
-                if (!out[key]) out[key] = { status: "ok", amount }
-                break
-            }
-            case "ClaimFailed": {
-                const reasonHex: string = parsed.args.reason
-                out[key] = { status: "failed", reason: reasonHex }
-                break
-            }
-            case "ClaimSkippedOnlySelf": {
-                out[key] = { status: "skipped", reason: "only_self" }
-                break
-            }
-            case "ClaimSkippedNoBalance": {
-                out[key] = { status: "skipped", reason: "no_balance" }
-                break
-            }
-        }
-    }
-    return out
-}
 
 // ---- fee bump helper --------------------------------------------------------
 

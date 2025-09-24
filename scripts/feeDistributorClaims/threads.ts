@@ -3,10 +3,21 @@ import fs from "fs"
 import path from "path"
 import { NonceManager } from "@ethersproject/experimental"
 
-import { REWARD_TOKEN_BY_CHAIN, FD_BY_CHAIN, VE_BY_CHAIN, INPUT_CSV_PATH, OUTPUT_NDJSON, ERRORS_NDJSON, EXECUTOR_STORE } from "./constants"
+import {
+    REWARD_TOKEN_BY_CHAIN,
+    FD_BY_CHAIN,
+    VE_BY_CHAIN,
+    INPUT_CSV_PATH,
+    OUTPUT_NDJSON,
+    ERRORS_NDJSON,
+    READER_STORE,
+    SKIPS_NDJSON,
+} from "./constants"
 
-import { getArg, ensureDirForFile, lineStream, addressFromCsvLine, VE_IFACE, EXEC_IFACE } from "./utils"
+import { getArg, ensureDirForFile, lineStream, addressFromCsvLine, VE_IFACE } from "./utils"
 import { runJob } from "./job"
+
+// import readerAbi from "../../artifacts/contracts/ClaimReader.sol/ClaimReader.json"
 
 // split main CSV to N shards, starting at `startLine` (dropping earlier lines)
 async function splitCsvIntoShards(mainCsv: string, outDir: string, workers: number, startLine: number) {
@@ -31,9 +42,9 @@ async function splitCsvIntoShards(mainCsv: string, outDir: string, workers: numb
 
 async function main() {
     const chain = getArg("chain", "arbitrum")
-    const workers = parseInt(getArg("workers", "1"), 10)
+    const workers = parseInt(getArg("workers", "10"), 10)
     const startLine = parseInt(getArg("start-line", "0"), 10)
-    const freshExecutor = /^1|true$/i.test(getArg("fresh-executor", ""))
+    const freshReader = /^1|true$/i.test(getArg("fresh-reader", ""))
     const forceResplit = /^1|true$/i.test(getArg("force-resplit", ""))
 
     console.log(`\n=== Threads Orchestrator ===`)
@@ -50,7 +61,8 @@ async function main() {
     const CSV_MAIN = path.resolve(process.cwd(), INPUT_CSV_PATH(chain))
     const OUT_BASE = path.resolve(process.cwd(), OUTPUT_NDJSON(chain))
     const ERR_BASE = path.resolve(process.cwd(), ERRORS_NDJSON(chain))
-    const EXEC_PATH = path.resolve(process.cwd(), EXECUTOR_STORE(chain))
+    const SKIP_BASE = path.resolve(process.cwd(), SKIPS_NDJSON(chain))
+    const READER_PATH = path.resolve(process.cwd(), READER_STORE(chain))
     const SHARD_DIR = path.join(path.dirname(CSV_MAIN), "shards")
 
     console.log(`FD:      ${FD}`)
@@ -60,12 +72,12 @@ async function main() {
     console.log(`Shards:  ${SHARD_DIR}/addresses.part{0..${workers - 1}}.csv`)
     console.log(`Out*:    ${OUT_BASE.replace(/\.ndjson$/, ".jobX.ndjson")}`)
     console.log(`Err*:    ${ERR_BASE.replace(/\.ndjson$/, ".jobX.ndjson")}`)
-    console.log(`Store:   ${EXEC_PATH}`)
+    console.log(`Store:   ${READER_PATH}`)
 
     // Ensure dirs
     ensureDirForFile(OUT_BASE)
     ensureDirForFile(ERR_BASE)
-    ensureDirForFile(EXEC_PATH)
+    ensureDirForFile(READER_PATH)
 
     // 1) Ensure VE locked
     const veCtr = new ethers.Contract(VE, VE_IFACE, ethers.provider)
@@ -81,34 +93,33 @@ async function main() {
     const managedDeployer = new NonceManager(deploySigner)
     await managedDeployer.setTransactionCount(await ethers.provider.getTransactionCount(await deploySigner.getAddress(), "latest"))
 
-    const ExecutorFactory = new ethers.ContractFactory(EXEC_IFACE.fragments, "0x", managedDeployer) // ABI-only factory (attach later)
     // we actually need the real factory from artifacts (with bytecode). Use artifacts:
-    const RealFactory = await ethers.getContractFactory("BatchClaimExecutor", managedDeployer)
+    const RealFactory = await ethers.getContractFactory("ClaimReader", managedDeployer)
 
-    let executorAddr: string | undefined
-    if (!freshExecutor && fs.existsSync(EXEC_PATH)) {
+    let readerAddr: string | undefined
+    if (!freshReader && fs.existsSync(READER_PATH)) {
         try {
-            const j = JSON.parse(fs.readFileSync(EXEC_PATH, "utf8"))
-            if (j?.address) executorAddr = ethers.utils.getAddress(j.address)
+            const j = JSON.parse(fs.readFileSync(READER_PATH, "utf8"))
+            if (j?.address) readerAddr = ethers.utils.getAddress(j.address)
         } catch {}
     }
 
-    let executor: any
-    if (executorAddr) {
-        const code = await ethers.provider.getCode(executorAddr)
+    let reader: any
+    if (readerAddr) {
+        const code = await ethers.provider.getCode(readerAddr)
         if (code && code !== "0x") {
-            executor = RealFactory.attach(executorAddr)
-            console.log(`Executor: ${executor.address} (attached from store)`)
+            reader = RealFactory.attach(readerAddr)
+            console.log(`Executor: ${reader.address} (attached from store)`)
         } else {
             console.log(`Executor in store has no code. Redeploying…`)
-            executor = await (await RealFactory.deploy(FD)).deployed()
-            fs.writeFileSync(EXEC_PATH, JSON.stringify({ address: executor.address, fd: FD, chain, deployedAt: Date.now() }, null, 2))
-            console.log(`Executor: ${executor.address} (deployed)`)
+            reader = await (await RealFactory.deploy(FD)).deployed()
+            fs.writeFileSync(READER_PATH, JSON.stringify({ address: reader.address, fd: FD, chain, deployedAt: Date.now() }, null, 2))
+            console.log(`Executor: ${reader.address} (deployed)`)
         }
     } else {
-        executor = await (await RealFactory.deploy(FD)).deployed()
-        fs.writeFileSync(EXEC_PATH, JSON.stringify({ address: executor.address, fd: FD, chain, deployedAt: Date.now() }, null, 2))
-        console.log(`Executor: ${executor.address} (deployed new)`)
+        reader = await (await RealFactory.deploy(FD)).deployed()
+        fs.writeFileSync(READER_PATH, JSON.stringify({ address: reader.address, fd: FD, chain, deployedAt: Date.now() }, null, 2))
+        console.log(`Executor: ${reader.address} (deployed new)`)
     }
 
     // 3) Split CSV -> shards (round-robin after startLine)
@@ -132,6 +143,7 @@ async function main() {
         const signer = allSigners[i]
         const outPath = OUT_BASE.replace(/\.ndjson$/, `.job${i}.ndjson`)
         const errPath = ERR_BASE.replace(/\.ndjson$/, `.job${i}.ndjson`)
+        const skipPath = SKIP_BASE.replace(/\.ndjson$/, `.job${i}.ndjson`)
         const shardCsvPath = shardPaths[i]
 
         console.log(`[Job ${i}] will read: ${shardCsvPath}`)
@@ -142,11 +154,12 @@ async function main() {
             runJob({
                 jobId: i,
                 signer,
-                executorAddress: executor.address,
+                readerAddress: reader.address,
                 token,
                 shardCsvPath,
                 outPath,
                 errPath,
+                skipPath,
             }).catch((e) => console.error(`[Job ${i}] fatal:`, e))
         )
     }

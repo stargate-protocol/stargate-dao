@@ -77,7 +77,7 @@ const config: HardhatUserConfig = {
         },
         anvil: {
             url: "http://127.0.0.1:8545",
-            timeout: 300_000, // 5 minutes
+            timeout: 2_400_000, // 40 minutes
         },
     },
 }
