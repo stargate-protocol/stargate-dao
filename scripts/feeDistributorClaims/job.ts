@@ -116,7 +116,8 @@ export async function runJob(cfg: JobConfig) {
                     )
                 } else if (res.status === "skipped") {
                     skipped++
-                    err.write(JSON.stringify({ address: u, token, status: "skipped_only_self", jobId, ts: Date.now() }) + "\n")
+                    const skipStatus = res.reason === "no_balance" ? "skipped_no_balance" : "skipped_only_self"
+                    err.write(JSON.stringify({ address: u, token, status: skipStatus, jobId, ts: Date.now() }) + "\n")
                 } else {
                     failed++
                     err.write(
@@ -156,7 +157,8 @@ export async function runJob(cfg: JobConfig) {
                 )
             } else if (res.status === "skipped") {
                 skipped++
-                err.write(JSON.stringify({ address: u, token, status: "skipped_only_self", jobId, ts: Date.now() }) + "\n")
+                const skipStatus = res.reason === "no_balance" ? "skipped_no_balance" : "skipped_only_self"
+                err.write(JSON.stringify({ address: u, token, status: skipStatus, jobId, ts: Date.now() }) + "\n")
             } else {
                 failed++
                 err.write(JSON.stringify({ address: u, token, status: "failed", error: res.reason || "revert", jobId, ts: Date.now() }) + "\n")

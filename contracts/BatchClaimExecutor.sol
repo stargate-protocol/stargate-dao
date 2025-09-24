@@ -9,10 +9,10 @@ import {IFeeDistributor} from "./interfaces/IFeeDistributor.sol";
 contract BatchClaimExecutor {
     IFeeDistributor public immutable oldFD;
 
-    event Claimed(address indexed user, IERC20 indexed token, uint256 amount);
     event ClaimedWithRounds(address indexed user, IERC20 indexed token, uint256 amount, uint256 rounds);
     event ClaimFailed(address indexed user, IERC20 indexed token, bytes reason);
     event ClaimSkippedOnlySelf(address indexed user, IERC20 indexed token);
+    event ClaimSkippedNoBalance(address indexed user, IERC20 indexed token);
 
     constructor(address _oldFD) {
         oldFD = IFeeDistributor(_oldFD);
@@ -21,21 +21,38 @@ contract BatchClaimExecutor {
     /// @notice Claims for multiple users in a single tx; loops each user until no more is claimable
     /// @dev Reverts if token is not enabled in the old FD.
     function batchFullClaimToken(address[] calldata users, IERC20 token) external returns (uint256 totalClaimed) {
-        require(oldFD.canTokenBeClaimed(token), "Token not allowed");
+        try oldFD.checkpointToken(token) {
+            // keep token cursor fresh so we can safely skip fully claimed users
+        } catch {}
 
         for (uint256 i = 0; i < users.length; ++i) {
             address user = users[i];
 
-            // Respect "only ve holder can claim" setting on old FD
-            if (oldFD.onlyVeHolderClaimingEnabled(user) && msg.sender != user) {
-                emit ClaimSkippedOnlySelf(user, token);
-                continue;
+            try oldFD.onlyVeHolderClaimingEnabled(user) returns (bool onlySelf) {
+                if (onlySelf) {
+                    emit ClaimSkippedOnlySelf(user, token);
+                    continue;
+                }
+            } catch {}
+
+            uint256 currentTokenCursor;
+            try oldFD.getTokenTimeCursor(token) returns (uint256 tc) {
+                currentTokenCursor = tc;
+            } catch {}
+
+            if (currentTokenCursor != 0) {
+                try oldFD.getUserTokenTimeCursor(user, token) returns (uint256 userCursor) {
+                    if (userCursor >= currentTokenCursor) {
+                        emit ClaimSkippedNoBalance(user, token);
+                        continue;
+                    }
+                } catch {}
             }
 
             uint256 claimed;
             uint256 rounds;
-            // huge safety cap to avoid pathological infinite loops
-            for (uint256 r = 0; r < 4096; ++r) {
+            // max rounds seems to be 6
+            for (uint256 r = 0; r < 10; ++r) {
                 try oldFD.claimToken(user, token) returns (uint256 amt) {
                     if (amt == 0) break;
                     claimed += amt;
@@ -50,11 +67,7 @@ contract BatchClaimExecutor {
 
             if (rounds > 0) {
                 emit ClaimedWithRounds(user, token, claimed, rounds);
-                emit Claimed(user, token, claimed);
                 totalClaimed += claimed;
-            } else if (claimed == 0) {
-                // if nothing claimed and not skipped, still emit a Claimed(0) for clarity
-                emit Claimed(user, token, 0);
             }
         }
     }

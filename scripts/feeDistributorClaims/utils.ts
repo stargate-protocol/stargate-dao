@@ -13,6 +13,7 @@ export const EXEC_IFACE = new ethers.utils.Interface([
     "event ClaimedWithRounds(address indexed user, address indexed token, uint256 amount, uint256 rounds)",
     "event ClaimFailed(address indexed user, address indexed token, bytes reason)",
     "event ClaimSkippedOnlySelf(address indexed user, address indexed token)",
+    "event ClaimSkippedNoBalance(address indexed user, address indexed token)",
     "function batchFullClaimToken(address[] users, address token) returns (uint256 totalClaimed)",
 ])
 
@@ -65,7 +66,10 @@ export async function* lineStream(csvPath: string) {
 
 // ---- receipt parsing --------------------------------------------------------
 
-export type PerUserResult = { status: "ok"; amount: string; rounds?: string } | { status: "failed"; reason?: string } | { status: "skipped" }
+export type PerUserResult =
+    | { status: "ok"; amount: string; rounds?: string }
+    | { status: "failed"; reason?: string }
+    | { status: "skipped"; reason?: string }
 
 export function parseBatchReceipt(rc: any, executorAddr: string): Record<string, PerUserResult> {
     const out: Record<string, PerUserResult> = {}
@@ -98,7 +102,11 @@ export function parseBatchReceipt(rc: any, executorAddr: string): Record<string,
                 break
             }
             case "ClaimSkippedOnlySelf": {
-                out[key] = { status: "skipped" }
+                out[key] = { status: "skipped", reason: "only_self" }
+                break
+            }
+            case "ClaimSkippedNoBalance": {
+                out[key] = { status: "skipped", reason: "no_balance" }
                 break
             }
         }

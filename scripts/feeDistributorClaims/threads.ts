@@ -31,7 +31,7 @@ async function splitCsvIntoShards(mainCsv: string, outDir: string, workers: numb
 
 async function main() {
     const chain = getArg("chain", "arbitrum")
-    const workers = parseInt(getArg("workers", "10"), 10)
+    const workers = parseInt(getArg("workers", "1"), 10)
     const startLine = parseInt(getArg("start-line", "0"), 10)
     const freshExecutor = /^1|true$/i.test(getArg("fresh-executor", ""))
     const forceResplit = /^1|true$/i.test(getArg("force-resplit", ""))
