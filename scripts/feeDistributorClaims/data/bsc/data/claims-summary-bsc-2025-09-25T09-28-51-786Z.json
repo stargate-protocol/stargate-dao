@@ -1,0 +1,16 @@
+{
+  "chain": "bsc",
+  "timestamp": "2025-09-25T09:28:51.786Z",
+  "claimsFile": "bsc/data/sorted-claims-by-amount.csv",
+  "summary": {
+    "totalClaims": 67413,
+    "uniqueAddresses": 67413,
+    "amounts": {
+      "totalAmountRaw": "169432021176436418813376",
+      "formatted": {
+        "decimals18": "169,432.021176436418813376",
+        "noDecimals": "169,432,021,176,436,418,813,376"
+      }
+    }
+  }
+}
