@@ -1,0 +1,16 @@
+{
+  "chain": "ethereum",
+  "timestamp": "2025-09-25T10:59:02.165Z",
+  "claimsFile": "ethereum/data/sorted-claims-by-amount.csv",
+  "summary": {
+    "totalClaims": 14877,
+    "uniqueAddresses": 14877,
+    "amounts": {
+      "totalAmountRaw": "214076521255",
+      "formatted": {
+        "decimals6": "214,076.521255",
+        "noDecimals": "214,076,521,255"
+      }
+    }
+  }
+}
