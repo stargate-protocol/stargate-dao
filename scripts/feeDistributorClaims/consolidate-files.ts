@@ -10,6 +10,8 @@ const writeFile = promisify(fs.writeFile)
 const stat = promisify(fs.stat)
 const mkdir = promisify(fs.mkdir)
 
+const chainName = "bsc"
+
 interface ConsolidationOptions {
     dataDir: string
     outputDir?: string
@@ -270,7 +272,7 @@ class FileConsolidator {
 // Standalone function to extract addresses from existing error files
 async function extractAddressesOnly() {
     const dataDir = path.join(__dirname, "data")
-    const targetChain = "avalanche"
+    const targetChain = chainName
 
     console.log("=== Error Addresses Extractor ===")
     console.log(`Data directory: ${dataDir}`)
@@ -313,7 +315,7 @@ async function main() {
 
     // Parse arguments
     let dataDir = path.join(__dirname, "data")
-    let targetChain = "avalanche"
+    let targetChain = chainName
 
     console.log("=== Fee Distributor Claims File Consolidator ===")
     console.log(`Data directory: ${dataDir}`)

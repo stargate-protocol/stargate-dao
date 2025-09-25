@@ -18,7 +18,8 @@ interface SortedClaimEntry {
     numericAmount: number
 }
 
-const chainName = "avalanche"
+const chainName = "bsc"
+const decimals = 18
 
 async function sortClaimsByAmount() {
     const inputFile = path.join(__dirname, `data/${chainName}/data/claims.ndjson`)
@@ -67,8 +68,8 @@ async function sortClaimsByAmount() {
         const sortedClaims: SortedClaimEntry[] = []
 
         for (const [address, numericAmount] of addressAmountMap.entries()) {
-            // Convert to 6 decimals (assuming the token has 6 decimals)
-            const formattedAmount = (numericAmount / 1000000).toFixed(6)
+            // Convert using configured decimals
+            const formattedAmount = (numericAmount / Math.pow(10, decimals)).toFixed(decimals)
 
             sortedClaims.push({
                 address: address,
@@ -84,7 +85,7 @@ async function sortClaimsByAmount() {
         console.log(`Sorted ${sortedClaims.length} records by claimed amount (descending)`)
 
         // Create CSV content
-        const csvLines = ["Address,Raw Amount,Formatted Amount (6 decimals)"]
+        const csvLines = [`Address,Raw Amount,Formatted Amount (${decimals} decimals)`]
 
         for (const claim of sortedClaims) {
             csvLines.push(`${claim.address},${claim.rawAmount},${claim.formattedAmount}`)
@@ -104,9 +105,9 @@ async function sortClaimsByAmount() {
 
         // Show summary statistics
         const totalRaw = sortedClaims.reduce((sum, claim) => sum + claim.numericAmount, 0)
-        const totalFormatted = (totalRaw / 1000000).toFixed(6)
+        const totalFormatted = (totalRaw / Math.pow(10, decimals)).toFixed(decimals)
         const avgRaw = Math.round(totalRaw / sortedClaims.length)
-        const avgFormatted = (avgRaw / 1000000).toFixed(6)
+        const avgFormatted = (avgRaw / Math.pow(10, decimals)).toFixed(decimals)
 
         console.log(`\nSummary:`)
         console.log(`Total records: ${sortedClaims.length}`)

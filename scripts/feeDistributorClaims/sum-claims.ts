@@ -8,7 +8,8 @@ const readFile = promisify(fs.readFile)
 const writeFile = promisify(fs.writeFile)
 const stat = promisify(fs.stat)
 
-const chainName = "avalanche"
+const chainName = "bsc"
+const decimals = 18
 
 interface ClaimRecord {
     address: string
@@ -92,7 +93,7 @@ class ClaimsSummarizer {
             if (!line) continue
 
             try {
-                // Parse CSV: Address,Raw Amount,Formatted Amount (6 decimals)
+                // Parse CSV: Address,Raw Amount,Formatted Amount (${decimals} decimals)
                 const columns = line.split(",")
                 if (columns.length < 2) {
                     console.warn(`Warning: Invalid CSV format on line ${i + 1}: ${line}`)
@@ -142,8 +143,8 @@ class ClaimsSummarizer {
         console.log(`Total Claimed Amount (raw): ${summary.totalAmount.toString()}`)
 
         // Format with different decimal assumptions
-        console.log("\nFormatted amounts (assuming different decimals):")
-        console.log(`  6 decimals (USDC/USDT): ${this.formatAmount(summary.totalAmount, 6)}`)
+        console.log("\nFormatted amounts:")
+        console.log(`  ${decimals} decimals: ${this.formatAmount(summary.totalAmount, decimals)}`)
         console.log(`  No decimals (wei/raw): ${this.formatAmount(summary.totalAmount, 0)}`)
 
         console.log("\n" + "=".repeat(50))
@@ -165,7 +166,7 @@ class ClaimsSummarizer {
                 amounts: {
                     totalAmountRaw: summary.totalAmount.toString(),
                     formatted: {
-                        decimals6: this.formatAmount(summary.totalAmount, 6),
+                        [`decimals${decimals}`]: this.formatAmount(summary.totalAmount, decimals),
                         noDecimals: this.formatAmount(summary.totalAmount, 0),
                     },
                 },
