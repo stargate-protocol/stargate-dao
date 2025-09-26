@@ -34,55 +34,41 @@ async function sortClaimsByAmount() {
 
         console.log(`Processing ${lines.length} claim records...`)
 
-        // Parse and process each line, consolidating duplicates by address
-        const addressAmountMap = new Map<string, number>()
-        let duplicatesFound = 0
-        let totalRecordsProcessed = 0
+        // Parse and process each line, aggregating by address to remove duplicates
+        const addressClaimsMap = new Map<string, number>()
 
         for (const line of lines) {
             try {
                 const record: ClaimRecord = JSON.parse(line)
-                const address = record.address.toLowerCase() // Normalize address case
                 const numericAmount = parseInt(record.claimedAmount)
+                const address = record.address
 
-                totalRecordsProcessed++
-
-                if (addressAmountMap.has(address)) {
-                    // Address already exists, sum the amounts
-                    const existingAmount = addressAmountMap.get(address)!
-                    addressAmountMap.set(address, existingAmount + numericAmount)
-                    duplicatesFound++
-                } else {
-                    // New address
-                    addressAmountMap.set(address, numericAmount)
-                }
+                // Aggregate amounts for duplicate addresses
+                const existingAmount = addressClaimsMap.get(address) || 0
+                addressClaimsMap.set(address, existingAmount + numericAmount)
             } catch (parseError) {
                 console.warn("Failed to parse line:", line.substring(0, 100) + "...")
             }
         }
 
-        console.log(`Found ${duplicatesFound} duplicate addresses out of ${totalRecordsProcessed} total records`)
-        console.log(`After deduplication: ${addressAmountMap.size} unique addresses`)
-
-        // Convert map to sorted array
+        // Convert aggregated data to sortable array
         const sortedClaims: SortedClaimEntry[] = []
-
-        for (const [address, numericAmount] of addressAmountMap.entries()) {
-            // Convert using configured decimals
-            const formattedAmount = (numericAmount / Math.pow(10, decimals)).toFixed(decimals)
+        for (const [address, totalAmount] of addressClaimsMap) {
+            // Convert to 6 decimals (assuming the token has 6 decimals)
+            const formattedAmount = (totalAmount / 1000000).toFixed(6)
 
             sortedClaims.push({
                 address: address,
-                rawAmount: numericAmount.toString(),
+                rawAmount: totalAmount.toString(),
                 formattedAmount: formattedAmount,
-                numericAmount: numericAmount,
+                numericAmount: totalAmount,
             })
         }
 
         // Sort by numeric amount in descending order
         sortedClaims.sort((a, b) => b.numericAmount - a.numericAmount)
 
-        console.log(`Sorted ${sortedClaims.length} records by claimed amount (descending)`)
+        console.log(`Sorted ${sortedClaims.length} unique addresses by claimed amount (descending)`)
 
         // Create CSV content
         const csvLines = [`Address,Raw Amount,Formatted Amount (${decimals} decimals)`]
