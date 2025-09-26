@@ -1,0 +1,22 @@
+{
+  "chain": "arbitrum",
+  "timestamp": "2025-09-26T12:51:58.727Z",
+  "claimsFile": "arbitrum/data/claims.ndjson",
+  "summary": {
+    "totalClaims": 140957,
+    "successfulClaims": 140957,
+    "failedClaims": 0,
+    "uniqueAddresses": 138692,
+    "uniqueTokens": 1,
+    "statusBreakdown": {
+      "ok": 140957
+    },
+    "amounts": {
+      "totalAmountRaw": "437951284915",
+      "formatted": {
+        "decimals6": "437,951.284915",
+        "noDecimals": "437,951,284,915"
+      }
+    }
+  }
+}
