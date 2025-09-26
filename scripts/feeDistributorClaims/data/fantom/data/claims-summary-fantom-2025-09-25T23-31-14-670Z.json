@@ -1,0 +1,16 @@
+{
+  "chain": "fantom",
+  "timestamp": "2025-09-25T23:31:14.670Z",
+  "claimsFile": "fantom/data/sorted-claims-by-amount.csv",
+  "summary": {
+    "totalClaims": 43304,
+    "uniqueAddresses": 43304,
+    "amounts": {
+      "totalAmountRaw": "17206350332",
+      "formatted": {
+        "decimals6": "17,206.350332",
+        "noDecimals": "17,206,350,332"
+      }
+    }
+  }
+}
