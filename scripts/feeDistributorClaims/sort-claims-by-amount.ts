@@ -54,8 +54,8 @@ async function sortClaimsByAmount() {
         // Convert aggregated data to sortable array
         const sortedClaims: SortedClaimEntry[] = []
         for (const [address, totalAmount] of addressClaimsMap) {
-            // Convert to 6 decimals (assuming the token has 6 decimals)
-            const formattedAmount = (totalAmount / 1000000).toFixed(6)
+            // Convert to decimals (assuming the token has decimals)
+            const formattedAmount = (totalAmount / Math.pow(10, decimals)).toFixed(decimals)
 
             sortedClaims.push({
                 address: address,
