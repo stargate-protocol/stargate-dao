@@ -6,9 +6,9 @@ import path from "path"
  * Also creates done-addresses files with addresses that were successfully processed
  */
 async function findMissingAddresses() {
-    const baseDir = path.join(__dirname, "data/arbitrum")
+    const baseDir = path.join(__dirname, "data/avalanche")
     const csvFile = path.join(baseDir, "in/addresses.csv")
-    const outDir = path.join(baseDir, "out1")
+    const outDir = path.join(baseDir, "data")
 
     console.log("Reading addresses from CSV...")
 
@@ -21,7 +21,7 @@ async function findMissingAddresses() {
             .filter((line) => line.length > 0)
     )
 
-    console.log(`Found ${allAddresses.size} addresses in CSV`)
+    console.log(`Found ${allAddresses.size} addresses in addresses.csv`)
 
     // Read all addresses from claims files
     console.log("Reading addresses from claims files...")
@@ -29,17 +29,20 @@ async function findMissingAddresses() {
     const claimDetails = new Map<string, any>() // Store the claim details for each address
 
     // Find all claims.job*.ndjson files
-    const claimsFiles = fs.readdirSync(outDir).filter((file) => file.startsWith("claims.job") && file.endsWith(".ndjson"))
+    const claimsFiles = fs.readdirSync(outDir).filter((file) => file.startsWith("claims") && file.endsWith(".ndjson"))
+    const skipFiles = fs.readdirSync(outDir).filter((file) => file.startsWith("skips") && file.endsWith(".ndjson"))
 
-    console.log(`Found ${claimsFiles.length} claims files`)
+    console.log(`Found ${claimsFiles.length} claims files with`)
+    console.log(`Found ${skipFiles.length} skip files`)
 
-    for (const claimsFile of claimsFiles) {
-        console.log(`Processing ${claimsFile}...`)
-        const filePath = path.join(outDir, claimsFile)
+    for (const file of [...claimsFiles, ...skipFiles]) {
+        const filePath = path.join(outDir, file)
 
         if (fs.existsSync(filePath)) {
             const content = fs.readFileSync(filePath, "utf-8")
             const lines = content.split("\n").filter((line) => line.trim().length > 0)
+
+            console.log(`Processing ${file} with ${lines.length} elements...`)
 
             for (const line of lines) {
                 try {
@@ -51,7 +54,7 @@ async function findMissingAddresses() {
                         claimDetails.set(addressLower, claim)
                     }
                 } catch (error) {
-                    console.warn(`Error parsing line in ${claimsFile}:`, line)
+                    console.warn(`Error parsing line in ${file}:`, line)
                 }
             }
         }
@@ -77,14 +80,14 @@ async function findMissingAddresses() {
 
     // Write missing addresses to a new file
     const missingAddressesArray = Array.from(missingAddresses).sort()
-    const outputFile = path.join(baseDir, "out1/missing-addresses.csv")
+    const outputFile = path.join(baseDir, "data/missing-addresses.csv")
 
     fs.writeFileSync(outputFile, missingAddressesArray.join("\n"))
 
     console.log(`Missing addresses written to: ${outputFile}`)
 
     // Also create an NDJSON file with more details
-    const detailsFile = path.join(baseDir, "out1/missing-addresses-details.ndjson")
+    const detailsFile = path.join(baseDir, "data/missing-addresses-details.ndjson")
     const details = missingAddressesArray.map((address) => ({
         address: address,
         inCsv: true,
@@ -98,14 +101,14 @@ async function findMissingAddresses() {
 
     // Write done addresses to files
     const doneAddressesArray = Array.from(doneAddresses).sort()
-    const doneOutputFile = path.join(baseDir, "out1/done-addresses.csv")
+    const doneOutputFile = path.join(baseDir, "data/done-addresses.csv")
 
     fs.writeFileSync(doneOutputFile, doneAddressesArray.join("\n"))
 
     console.log(`Done addresses written to: ${doneOutputFile}`)
 
     // Also create an NDJSON file with claim details for done addresses
-    const doneDetailsFile = path.join(baseDir, "out1/done-addresses.ndjson")
+    const doneDetailsFile = path.join(baseDir, "data/done-addresses.ndjson")
     const doneDetails = doneAddressesArray.map((address) => {
         const claimDetail = claimDetails.get(address)
         return {

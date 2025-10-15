@@ -18,8 +18,8 @@ interface SortedClaimEntry {
     numericAmount: number
 }
 
-const chainName = "bsc"
-const decimals = 18
+const chainName = "avalanche"
+const decimals = 6
 
 async function sortClaimsByAmount() {
     const inputFile = path.join(__dirname, `data/${chainName}/data/claims.ndjson`)
@@ -36,6 +36,7 @@ async function sortClaimsByAmount() {
 
         // Parse and process each line, aggregating by address to remove duplicates
         const addressClaimsMap = new Map<string, number>()
+        let dupCount = 0
 
         for (const line of lines) {
             try {
@@ -45,7 +46,22 @@ async function sortClaimsByAmount() {
 
                 // Aggregate amounts for duplicate addresses
                 const existingAmount = addressClaimsMap.get(address) || 0
-                addressClaimsMap.set(address, existingAmount + numericAmount)
+
+                if (existingAmount !== 0) {
+                    console.log(
+                        `DUPLICATE FOUND - Address: ${address}, Existing: ${(existingAmount / Math.pow(10, decimals)).toFixed(
+                            decimals
+                        )}, New: ${(numericAmount / Math.pow(10, decimals)).toFixed(decimals)}, Total: ${(
+                            (existingAmount + numericAmount) /
+                            Math.pow(10, decimals)
+                        ).toFixed(decimals)}`
+                    )
+                    dupCount++
+                    if (existingAmount !== numericAmount) {
+                        console.warn("New amount not equal to existing amount")
+                    }
+                }
+                addressClaimsMap.set(address, numericAmount)
             } catch (parseError) {
                 console.warn("Failed to parse line:", line.substring(0, 100) + "...")
             }
@@ -96,6 +112,8 @@ async function sortClaimsByAmount() {
         const avgFormatted = (avgRaw / Math.pow(10, decimals)).toFixed(decimals)
 
         console.log(`\nSummary:`)
+        console.log(`Total claims: ${lines.length}`)
+        console.log(`Duplicated claims found: ${dupCount}`)
         console.log(`Total records: ${sortedClaims.length}`)
         console.log(`Total claimed amount: ${totalFormatted} (raw: ${totalRaw})`)
         console.log(`Average claimed amount: ${avgFormatted} (raw: ${avgRaw})`)
